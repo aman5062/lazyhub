@@ -13,7 +13,7 @@ import (
 //
 //	go test ./internal/tui -run Preview -v
 func TestPreview(t *testing.T) {
-	m := New(github.New("x"), "aman5062")
+	m := New(github.New("x"), "aman5062", "v0.1.2")
 	m.width, m.height = 120, 30
 	m.scr = screenBoard
 	m.loading = false

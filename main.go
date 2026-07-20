@@ -12,6 +12,7 @@ import (
 	"github.com/aman5062/lazyhub/internal/config"
 	"github.com/aman5062/lazyhub/internal/github"
 	"github.com/aman5062/lazyhub/internal/tui"
+	"github.com/aman5062/lazyhub/internal/update"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -26,6 +27,7 @@ Usage:
   lazyhub login      Authenticate with GitHub (PAT or device flow)
   lazyhub logout     Remove the stored credential
   lazyhub whoami     Show the logged-in account
+  lazyhub upgrade    Update to the latest release
   lazyhub version    Print the version
   lazyhub help       Show this help
 `
@@ -51,6 +53,8 @@ func main() {
 		whoami()
 	case "version", "-v", "--version":
 		fmt.Printf("lazyhub %s\n", version)
+	case "upgrade", "update":
+		upgrade()
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
@@ -64,6 +68,20 @@ func fail(err error) {
 	os.Exit(1)
 }
 
+// upgrade downloads and installs the latest release over this binary.
+func upgrade() {
+	fmt.Println("Checking for updates…")
+	latest, err := update.SelfUpdate(context.Background(), version)
+	if errors.Is(err, update.ErrUpToDate) {
+		fmt.Printf("Already on the latest version (%s).\n", latest)
+		return
+	}
+	if err != nil {
+		fail(err)
+	}
+	fmt.Printf("✓ Updated to %s. Restart lazyhub to use it.\n", latest)
+}
+
 // run ensures we're authenticated, then launches the TUI.
 func run() {
 	a, err := config.LoadAuth()
@@ -74,7 +92,7 @@ func run() {
 		fail(err)
 	}
 	client := github.New(a.Token)
-	m := tui.New(client, a.Login)
+	m := tui.New(client, a.Login, version)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fail(err)

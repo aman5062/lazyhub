@@ -14,6 +14,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/aman5062/lazyhub/internal/config"
 	"github.com/aman5062/lazyhub/internal/github"
+	"github.com/aman5062/lazyhub/internal/update"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -119,6 +121,8 @@ type boardLoadedMsg struct {
 	silent bool // background auto-sync: don't blank the board or reset cursor
 }
 
+type updateAvailMsg struct{ version string }
+
 type autoSyncTickMsg struct{}
 
 func scheduleSync() tea.Cmd {
@@ -143,10 +147,12 @@ func clearStatusMsg() tea.Msg { return actionMsg{} }
 // --- model ---
 
 type Model struct {
-	client *github.Client
-	login  string
-	width  int
-	height int
+	client      *github.Client
+	login       string
+	version     string
+	updateAvail string // set to the newer version tag if one is available
+	width       int
+	height      int
 
 	scr     screen
 	loading bool
@@ -176,7 +182,7 @@ type Model struct {
 	inputPurpose inputPurpose
 }
 
-func New(client *github.Client, login string) Model {
+func New(client *github.Client, login, version string) Model {
 	d := list.NewDefaultDelegate()
 	d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(colorAccent).BorderForeground(colorAccent)
 	d.Styles.SelectedDesc = d.Styles.SelectedDesc.Foreground(colorFg).BorderForeground(colorAccent)
@@ -193,6 +199,7 @@ func New(client *github.Client, login string) Model {
 	return Model{
 		client:   client,
 		login:    login,
+		version:  version,
 		scr:      screenProjects,
 		loading:  true,
 		projects: l,
@@ -203,7 +210,22 @@ func New(client *github.Client, login string) Model {
 func (m Model) Init() tea.Cmd {
 	// One long-lived sync ticker for the app's lifetime; it only does work
 	// while a board is open and idle (see the autoSyncTickMsg handler).
-	return tea.Batch(m.loadProjects(), m.spin.Tick, scheduleSync())
+	return tea.Batch(m.loadProjects(), m.spin.Tick, scheduleSync(), m.checkUpdate())
+}
+
+// checkUpdate asks GitHub (once, in the background) whether a newer release
+// exists, so we can show an unobtrusive notice.
+func (m Model) checkUpdate() tea.Cmd {
+	ver := m.version
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		latest, err := update.Latest(ctx)
+		if err != nil || !update.IsNewer(ver, latest) {
+			return updateAvailMsg{}
+		}
+		return updateAvailMsg{version: latest}
+	}
 }
 
 // --- commands ---
@@ -371,6 +393,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
+		return m, nil
+
+	case updateAvailMsg:
+		m.updateAvail = msg.version
 		return m, nil
 
 	case spinner.TickMsg:
@@ -836,13 +862,46 @@ func (m Model) tempStatus(text, kind string) tea.Cmd {
 	return func() tea.Msg { return actionMsg{text: text, kind: kind} }
 }
 
+// pickerDelegate renders picker rows with a colored dot, a ❯ cursor, and a
+// "✓ current" marker — much cleaner than the default list rows.
+type pickerDelegate struct{}
+
+func (pickerDelegate) Height() int                             { return 1 }
+func (pickerDelegate) Spacing() int                            { return 0 }
+func (pickerDelegate) Update(tea.Msg, *list.Model) tea.Cmd     { return nil }
+func (d pickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	cur := index == m.Index()
+	cursor := "  "
+	if cur {
+		cursor = selectedArrow.Render("❯ ")
+	}
+	nameSt := lipgloss.NewStyle().Foreground(colorFg)
+	if cur {
+		nameSt = nameSt.Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	}
+	switch it := item.(type) {
+	case pickItem:
+		dot := lipgloss.NewStyle().Foreground(statusColor(it.label)).Render("●")
+		row := cursor + dot + " " + nameSt.Render(it.label)
+		if it.selected {
+			row += "   " + publicBadge.Render("✓ current")
+		}
+		fmt.Fprint(w, row)
+	case fieldItem:
+		row := cursor + lipgloss.NewStyle().Foreground(colorAccent).Render("◈ ") +
+			nameSt.Render(it.f.Name) + "  " + detailLabel.Render(truncate(it.Description(), 34))
+		fmt.Fprint(w, row)
+	default:
+		fmt.Fprint(w, cursor+nameSt.Render(item.FilterValue()))
+	}
+}
+
 func (m Model) newPicker(title string, items []list.Item) list.Model {
-	d := list.NewDefaultDelegate()
-	d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(colorAccent).BorderForeground(colorAccent)
-	l := list.New(items, d, 0, 0)
+	l := list.New(items, pickerDelegate{}, 0, 0)
 	l.Title = title
 	l.Styles.Title = titleStyle
 	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
 	w, h := m.pickerSize()
 	l.SetSize(w, h)
 	return l
@@ -894,6 +953,10 @@ func (m Model) View() string {
 		scope = "Projects · mine"
 	}
 	header := titleStyle.Render("lazyhub") + statusBar.Render(" @"+m.login+"  ·  "+scope)
+	if m.updateAvail != "" {
+		header += lipgloss.NewStyle().Foreground(colorYellow).Bold(true).
+			Render("  ⬆ " + m.updateAvail + " available — run: lazyhub upgrade")
+	}
 
 	var body string
 	switch m.scr {
@@ -1089,56 +1152,64 @@ func (m Model) renderCard(it github.ProjectItem, w int, selected bool) string {
 	} else if strings.EqualFold(it.State, "CLOSED") {
 		kind = "●"
 	}
+	sc := statusColor(it.Status)
 
-	barColor := statusColor(it.Status)
-	bar := lipgloss.NewStyle().Foreground(barColor).Render("▍")
+	// Selection is shown by a thick accent bar + bold bright title — no
+	// background fill (which fragments behind coloured text in terminals).
+	barCh, barCol := "│", sc
 	if selected {
-		bar = lipgloss.NewStyle().Foreground(colorAccent).Render("▍")
+		barCh, barCol = "┃", colorAccent
 	}
+	bar := lipgloss.NewStyle().Foreground(barCol).Render(barCh)
 
-	textW := w - 3
+	// Width left for the title after "│ ○ #14 " prefix (bar+space+icon+space+num+space).
+	textW := w - 5 - len([]rune(num))
 	if textW < 6 {
 		textW = 6
 	}
-	title := it.Title
-	if lipgloss.Width(title) > textW {
-		title = title[:max0(textW-1, 1)] + "…"
-	}
-
-	numStyle := lipgloss.NewStyle().Foreground(colorDim)
-	titleStyle2 := lipgloss.NewStyle().Foreground(colorFg)
+	title := truncate(it.Title, textW)
+	titleSt := lipgloss.NewStyle().Foreground(colorFg)
 	if selected {
-		titleStyle2 = titleStyle2.Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+		titleSt = titleSt.Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	}
-	line1 := kind + " " + numStyle.Render(num) + " " + titleStyle2.Render(title)
 
-	var line2 string
+	line1 := lipgloss.NewStyle().Foreground(sc).Render(kind) + " " +
+		lipgloss.NewStyle().Foreground(colorDim).Render(num) + " " + titleSt.Render(title)
+
+	// Meta line: assignee chips (or "unassigned") + repo, dimmed.
+	var meta string
 	if len(it.Assignees) > 0 {
 		chips := make([]string, 0, len(it.Assignees))
 		for _, a := range it.Assignees {
 			chips = append(chips, avatarChip(a))
 		}
-		line2 = "  " + strings.Join(chips, " ")
+		meta = strings.Join(chips, " ")
 	} else {
-		line2 = "  " + lipgloss.NewStyle().Foreground(colorFaint).Render("· unassigned")
+		meta = lipgloss.NewStyle().Foreground(colorFaint).Render("unassigned")
 	}
-	if it.RepoName != "" {
-		line2 += lipgloss.NewStyle().Foreground(colorFaint).Render("  " + it.RepoName)
+	if it.RepoName != "" && len(it.Assignees) == 0 {
+		// Only show the repo when there's room (no assignee chips crowding it).
+		meta += lipgloss.NewStyle().Foreground(colorFaint).Render("  " + truncate(it.RepoName, w-14))
 	}
+	line2 := "  " + meta
 
-	body := lipgloss.JoinVertical(lipgloss.Left, line1, line2)
-	body = lipgloss.NewStyle().Width(w - 1).Render(body)
-	if selected {
-		body = cardSelected.Width(w - 1).Render(lipgloss.JoinVertical(lipgloss.Left, line1, line2))
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, bar, body)
+	content := lipgloss.JoinVertical(lipgloss.Left, line1, line2)
+	return lipgloss.JoinHorizontal(lipgloss.Top, bar, " ", content)
 }
 
-func max0(a, b int) int {
-	if a > b {
-		return a
+// truncate shortens s to at most w display cells, adding an ellipsis.
+func truncate(s string, w int) string {
+	if lipgloss.Width(s) <= w {
+		return s
 	}
-	return b
+	if w < 1 {
+		w = 1
+	}
+	r := []rune(s)
+	if len(r) > w-1 {
+		r = r[:w-1]
+	}
+	return string(r) + "…"
 }
 
 func (m Model) statusView() string {

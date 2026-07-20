@@ -113,7 +113,12 @@ lazyhub          Launch the TUI (prompts login on first run)
 lazyhub login    Authenticate
 lazyhub logout   Remove stored token
 lazyhub whoami   Show current account
+lazyhub upgrade  Update to the latest release in place
+lazyhub version  Print the version
 ```
+
+lazyhub checks for a newer release on startup and shows an unobtrusive
+`⬆ vX available` notice; run `lazyhub upgrade` to self-update.
 
 ## Keybindings
 
