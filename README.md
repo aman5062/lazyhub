@@ -56,12 +56,55 @@ GitHub **OAuth App** (Device Flow enabled). Set its Client ID via
 
 ## Install
 
+Pick whichever fits you — the first needs **neither Go nor git**.
+
+### 1. Prebuilt binary (recommended)
+
+Download the archive for your OS/arch from the
+[**latest release**](https://github.com/aman5062/lazyhub/releases/latest),
+extract it, and put `lazyhub` on your `PATH`.
+
+**Linux (amd64):**
 ```bash
-git clone git@github.com:aman5062/lazyhub.git
+curl -L https://github.com/aman5062/lazyhub/releases/latest/download/lazyhub_linux_amd64.tar.gz | tar xz
+sudo mv lazyhub /usr/local/bin/
+lazyhub
+```
+
+**macOS (Apple Silicon):**
+```bash
+curl -L https://github.com/aman5062/lazyhub/releases/latest/download/lazyhub_darwin_arm64.tar.gz | tar xz
+sudo mv lazyhub /usr/local/bin/
+lazyhub
+```
+> On macOS, if Gatekeeper blocks it: `xcode-select --install` isn't needed —
+> just run `xattr -d com.apple.quarantine ./lazyhub` once.
+
+**Windows:** download `lazyhub_windows_amd64.zip` from the release, unzip, and
+run `lazyhub.exe` (or add its folder to `PATH`).
+
+Available archives: `linux_amd64`, `linux_arm64`, `darwin_amd64`,
+`darwin_arm64`, `windows_amd64`, `windows_arm64`. Verify with
+`checksums.txt` if you like.
+
+### 2. `go install` (Go 1.23+)
+
+The native one-liner for Go tools — no manual cloning:
+```bash
+go install github.com/aman5062/lazyhub@latest
+lazyhub   # from ~/go/bin (add it to PATH if needed)
+```
+
+### 3. Build from source (for developing lazyhub)
+
+```bash
+git clone https://github.com/aman5062/lazyhub.git
 cd lazyhub
-go build -o lazyhub .   # needs Go 1.23+
+go build -o lazyhub .
 ./lazyhub
 ```
+
+Check your version anytime with `lazyhub version`.
 
 ## Commands
 
