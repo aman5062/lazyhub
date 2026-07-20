@@ -28,7 +28,7 @@ import (
 // A device-flow Client ID is NOT a secret (there is no client secret in
 // the device flow), so it is safe to embed. Replace with your own
 // registered app's ID, or override at runtime with LAZYHUB_CLIENT_ID.
-const defaultClientID = ""
+const defaultClientID = "Ov23liOwaFq7EqWmeKBE"
 
 func clientID() string {
 	if v := os.Getenv("LAZYHUB_CLIENT_ID"); v != "" {

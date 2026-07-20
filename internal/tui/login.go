@@ -28,7 +28,7 @@ type loginMethod struct {
 
 var loginMethods = []loginMethod{
 	{"Personal Access Token", "Paste a token · set \"No expiration\" for a permanent login"},
-	{"Browser device flow", "Approve in the browser, no copy-paste · needs an OAuth App Client ID"},
+	{"Browser device flow", "Approve in the browser — no token to copy-paste"},
 }
 
 // LoginModel is a small arrow-key login screen shown before the main TUI.

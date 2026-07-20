@@ -48,11 +48,11 @@ stored at `~/.config/lazyhub/auth.json` (perms `0600`), so you log in once.
    Scopes: **`project`**, `repo`, `read:org`
 2. `lazyhub login` → choose **1** → paste it.
 
-### Option B — Browser device flow (the polished path)
+### Option B — Browser device flow (no token to paste)
 
-`gh`-style: lazyhub prints a code, you approve in the browser. Needs a one-time
-GitHub **OAuth App** (Device Flow enabled). Set its Client ID via
-`LAZYHUB_CLIENT_ID` or bake it into `internal/auth/auth.go`.
+`gh`-style: lazyhub prints a short code, you approve in the browser, done — no
+copy-pasting secrets. Works out of the box (a public OAuth App Client ID ships
+with lazyhub). To use your own app instead, set `LAZYHUB_CLIENT_ID`.
 
 ## Install
 
