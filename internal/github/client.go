@@ -168,6 +168,13 @@ func (c *Client) RemoveAssignees(ctx context.Context, owner, repo string, number
 		map[string]any{"assignees": logins}, nil)
 }
 
+// AddComment posts a comment on an issue or PR.
+func (c *Client) AddComment(ctx context.Context, owner, repo string, number int, body string) error {
+	return c.doJSON(ctx, http.MethodPost,
+		fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, number),
+		map[string]any{"body": body}, nil)
+}
+
 // ListRepos returns repos for the authenticated user, most-recently-pushed
 // first, paginated. perPage max is 100.
 func (c *Client) ListRepos(ctx context.Context, page, perPage int) ([]Repo, error) {

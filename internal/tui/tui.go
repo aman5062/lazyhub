@@ -23,6 +23,7 @@ import (
 	"github.com/aman5062/lazyhub/internal/github"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -33,7 +34,16 @@ const (
 	screenProjects screen = iota
 	screenBoard
 	screenAssignee
-	screenStatus
+	screenStatus    // pick an option for the current field (Status via `s`, or any field via `p`)
+	screenFieldPick // pick which single-select field to edit (via `p`)
+	screenInput     // free text: create a draft ticket, or add a comment
+)
+
+type inputPurpose int
+
+const (
+	inputCreate inputPurpose = iota
+	inputComment
 )
 
 const (
@@ -77,6 +87,19 @@ func (i pickItem) Title() string {
 func (i pickItem) Description() string { return i.sub }
 func (i pickItem) FilterValue() string { return i.label }
 
+// fieldItem adapts a single-select field for the "which field?" picker.
+type fieldItem struct{ f github.SingleSelectField }
+
+func (i fieldItem) Title() string { return i.f.Name }
+func (i fieldItem) Description() string {
+	names := make([]string, 0, len(i.f.Options))
+	for _, o := range i.f.Options {
+		names = append(names, o.Name)
+	}
+	return strings.Join(names, " · ")
+}
+func (i fieldItem) FilterValue() string { return i.f.Name }
+
 // boardColumn is one status column with its cards.
 type boardColumn struct {
 	name  string
@@ -103,6 +126,10 @@ func scheduleSync() tea.Cmd {
 }
 type assigneesLoadedMsg struct {
 	logins []string
+	err    error
+}
+type fieldsLoadedMsg struct {
+	fields []github.SingleSelectField
 	err    error
 }
 type actionMsg struct {
@@ -143,7 +170,10 @@ type Model struct {
 	cardCursor int
 	filterMine bool
 
-	picker list.Model
+	picker       list.Model
+	pendingField *github.SingleSelectField // field whose option is being picked
+	input        textinput.Model
+	inputPurpose inputPurpose
 }
 
 func New(client *github.Client, login string) Model {
@@ -207,6 +237,28 @@ func (m Model) loadAssignees(it github.ProjectItem) tea.Cmd {
 		logins, err := m.client.ListAssignableUsers(ctx, it.RepoOwner, it.RepoName)
 		return assigneesLoadedMsg{logins: logins, err: err}
 	}
+}
+
+func (m Model) loadFields() tea.Cmd {
+	proj := m.curProject
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		fields, err := m.client.ListSingleSelectFields(ctx, proj.ID)
+		return fieldsLoadedMsg{fields: fields, err: err}
+	}
+}
+
+// newTextInput builds the input for creating a ticket / adding a comment.
+func (m *Model) openInput(purpose inputPurpose, placeholder string) {
+	ti := textinput.New()
+	ti.Placeholder = placeholder
+	ti.CharLimit = 500
+	ti.Width = 50
+	ti.Focus()
+	m.input = ti
+	m.inputPurpose = purpose
+	m.scr = screenInput
 }
 
 // --- board helpers ---
@@ -290,6 +342,15 @@ func (m *Model) restoreSelection(itemID string) {
 		}
 	}
 	m.clampBoard()
+}
+
+// currentFieldValue returns the item's current value for a field, when known.
+// We only track the Status value per item, so other fields start unmarked.
+func currentFieldValue(it github.ProjectItem, f github.SingleSelectField) string {
+	if f.Name == "Status" {
+		return it.Status
+	}
+	return ""
 }
 
 func (m *Model) selectedItem() (github.ProjectItem, bool) {
@@ -401,6 +462,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		return m, nil
 
+	case fieldsLoadedMsg:
+		if msg.err != nil {
+			return m, m.tempStatus("fields: "+msg.err.Error(), "err")
+		}
+		var li []list.Item
+		for _, f := range msg.fields {
+			if len(f.Options) == 0 {
+				continue
+			}
+			li = append(li, fieldItem{f})
+		}
+		if len(li) == 0 {
+			return m, m.tempStatus("no editable single-select fields on this board", "err")
+		}
+		m.picker = m.newPicker("Which field?", li)
+		m.scr = screenFieldPick
+		m.resize()
+		return m, nil
+
 	case actionMsg:
 		m.status, m.statKnd = msg.text, msg.kind
 		var cmds []tea.Cmd
@@ -422,8 +502,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.scr {
 	case screenProjects:
 		m.projects, cmd = m.projects.Update(msg)
-	case screenAssignee, screenStatus:
+	case screenAssignee, screenStatus, screenFieldPick:
 		m.picker, cmd = m.picker.Update(msg)
+	case screenInput:
+		m.input, cmd = m.input.Update(msg)
 	}
 	return m, cmd
 }
@@ -444,7 +526,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	filtering := (m.scr == screenProjects && m.projects.FilterState() == list.Filtering) ||
-		((m.scr == screenAssignee || m.scr == screenStatus) && m.picker.FilterState() == list.Filtering)
+		((m.scr == screenAssignee || m.scr == screenStatus || m.scr == screenFieldPick) && m.picker.FilterState() == list.Filtering)
 
 	if !filtering && (key == "ctrl+c") {
 		return m, tea.Quit
@@ -539,8 +621,67 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if _, ok := m.selectedItem(); ok {
 				return m.openStatusPicker()
 			}
+		case "p":
+			if _, ok := m.selectedItem(); ok {
+				return m, m.loadFields()
+			}
+		case "n":
+			m.openInput(inputCreate, "New ticket title…")
+			return m, textinput.Blink
+		case "c":
+			if it, ok := m.selectedItem(); ok {
+				if it.Number == 0 {
+					return m, m.tempStatus("draft items have no comments", "err")
+				}
+				m.openInput(inputComment, "Write a comment…")
+				return m, textinput.Blink
+			}
 		}
 		return m, nil
+
+	case screenFieldPick:
+		switch key {
+		case "esc":
+			m.scr = screenBoard
+			return m, nil
+		case "enter":
+			if !filtering {
+				if fi, ok := m.picker.SelectedItem().(fieldItem); ok {
+					it, _ := m.selectedItem()
+					f := fi.f
+					m.pendingField = &f
+					m.openOptionPicker(currentFieldValue(it, f))
+					return m, nil
+				}
+			}
+		}
+		var cmd tea.Cmd
+		m.picker, cmd = m.picker.Update(msg)
+		return m, cmd
+
+	case screenInput:
+		switch key {
+		case "esc":
+			m.scr = screenBoard
+			m.input.Blur()
+			return m, nil
+		case "enter":
+			val := strings.TrimSpace(m.input.Value())
+			if val == "" {
+				return m, m.tempStatus("type something first", "err")
+			}
+			m.scr = screenBoard
+			if m.inputPurpose == inputCreate {
+				return m, m.createTicket(val)
+			}
+			if it, ok := m.selectedItem(); ok {
+				return m, m.postComment(it, val)
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
 
 	case screenAssignee:
 		switch key {
@@ -600,14 +741,22 @@ func (m Model) openStatusPicker() (tea.Model, tea.Cmd) {
 		return m, m.tempStatus("this board has no Status columns", "err")
 	}
 	it, _ := m.selectedItem()
-	var li []list.Item
-	for _, o := range m.statusFld.Options {
-		li = append(li, pickItem{label: o.Name, id: o.ID, selected: o.Name == it.Status})
+	m.pendingField = &github.SingleSelectField{
+		ID: m.statusFld.FieldID, Name: "Status", Options: m.statusFld.Options,
 	}
-	m.picker = m.newPicker("Move to column", li)
+	m.openOptionPicker(it.Status)
+	return m, nil
+}
+
+// openOptionPicker shows the options of m.pendingField, marking the current one.
+func (m *Model) openOptionPicker(current string) {
+	var li []list.Item
+	for _, o := range m.pendingField.Options {
+		li = append(li, pickItem{label: o.Name, id: o.ID, selected: o.Name == current})
+	}
+	m.picker = m.newPicker("Set "+m.pendingField.Name, li)
 	m.scr = screenStatus
 	m.resize()
-	return m, nil
 }
 
 func (m Model) toggleAssignee() (tea.Model, tea.Cmd) {
@@ -640,20 +789,46 @@ func (m Model) toggleAssignee() (tea.Model, tea.Cmd) {
 
 func (m Model) applyStatus() (tea.Model, tea.Cmd) {
 	pi, ok := m.picker.SelectedItem().(pickItem)
-	if !ok {
+	if !ok || m.pendingField == nil {
 		return m, nil
 	}
 	it, _ := m.selectedItem()
 	proj := m.curProject
-	fieldID := m.statusFld.FieldID
+	fieldID := m.pendingField.ID
+	fieldName := m.pendingField.Name
 	m.scr = screenBoard
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := m.client.SetItemStatus(ctx, proj.ID, it.ItemID, fieldID, pi.id); err != nil {
-			return actionMsg{text: "move failed: " + err.Error(), kind: "err"}
+			return actionMsg{text: "update failed: " + err.Error(), kind: "err"}
 		}
-		return actionMsg{text: "Moved to " + pi.label, kind: "ok", reload: true}
+		return actionMsg{text: fmt.Sprintf("%s → %s", fieldName, pi.label), kind: "ok", reload: true}
+	}
+}
+
+// createTicket adds a draft ticket to the board from the input text.
+func (m Model) createTicket(title string) tea.Cmd {
+	proj := m.curProject
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := m.client.AddDraftIssue(ctx, proj.ID, title, ""); err != nil {
+			return actionMsg{text: "create failed: " + err.Error(), kind: "err"}
+		}
+		return actionMsg{text: "Created draft ticket", kind: "ok", reload: true}
+	}
+}
+
+// postComment adds a comment to the selected issue/PR.
+func (m Model) postComment(it github.ProjectItem, body string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := m.client.AddComment(ctx, it.RepoOwner, it.RepoName, it.Number, body); err != nil {
+			return actionMsg{text: "comment failed: " + err.Error(), kind: "err"}
+		}
+		return actionMsg{text: "Comment posted", kind: "ok"}
 	}
 }
 
@@ -681,7 +856,7 @@ func (m *Model) resize() {
 		bodyH = 3
 	}
 	m.projects.SetSize(m.width-2, bodyH)
-	if m.scr == screenAssignee || m.scr == screenStatus {
+	if m.scr == screenAssignee || m.scr == screenStatus || m.scr == screenFieldPick {
 		w, h := m.pickerSize()
 		m.picker.SetSize(w, h)
 	}
@@ -730,11 +905,33 @@ func (m Model) View() string {
 		}
 	case screenBoard:
 		body = m.boardView()
-	case screenAssignee, screenStatus:
+	case screenAssignee, screenStatus, screenFieldPick:
 		body = paneBorderActive.Padding(0, 1).Render(m.picker.View())
+	case screenInput:
+		body = m.inputView()
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, m.statusView(), m.helpBar())
+}
+
+func (m Model) inputView() string {
+	heading := "Create a draft ticket"
+	hint := "Adds a draft card to this board."
+	if m.inputPurpose == inputComment {
+		heading = "Add a comment"
+		if it, ok := m.selectedItem(); ok {
+			hint = fmt.Sprintf("On %s/%s #%d", it.RepoOwner, it.RepoName, it.Number)
+		}
+	}
+	box := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Render(heading),
+		detailLabel.Render(hint),
+		"",
+		m.input.View(),
+		"",
+		helpStyle.Render("enter submit · esc cancel"),
+	)
+	return "\n" + paneBorderActive.Padding(1, 2).Render(box)
 }
 
 func (m Model) boardView() string {
@@ -964,11 +1161,15 @@ func (m Model) helpBar() string {
 	case screenProjects:
 		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "open"}, {"o", "web"}, {"?", "help"}, {"X", "logout"}, {"q", "quit"}}
 	case screenBoard:
-		pairs = [][2]string{{"←→", "column"}, {"↑↓", "card"}, {"a", "assign"}, {"s", "move"}, {"m", "mine"}, {"o", "open"}, {"r", "sync"}, {"?", "help"}, {"esc", "back"}}
+		pairs = [][2]string{{"←→↑↓", "nav"}, {"n", "new"}, {"a", "assign"}, {"s", "status"}, {"p", "field"}, {"c", "comment"}, {"m", "mine"}, {"o", "open"}, {"?", "help"}, {"esc", "back"}}
 	case screenAssignee:
 		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "toggle"}, {"esc", "back"}}
 	case screenStatus:
-		pairs = [][2]string{{"↑↓", "move"}, {"↵", "move here"}, {"esc", "back"}}
+		pairs = [][2]string{{"↑↓", "move"}, {"↵", "set"}, {"esc", "back"}}
+	case screenFieldPick:
+		pairs = [][2]string{{"↑↓", "move"}, {"↵", "choose field"}, {"esc", "back"}}
+	case screenInput:
+		pairs = [][2]string{{"↵", "submit"}, {"esc", "cancel"}}
 	}
 	parts := make([]string, 0, len(pairs))
 	for _, p := range pairs {
@@ -988,8 +1189,11 @@ func (m Model) helpOverlay() string {
 		{"Board (kanban)", ""},
 		{"  ← / → (h/l)", "move between columns"},
 		{"  ↑ / ↓ (k/j)", "move between cards"},
+		{"  n", "create a new draft ticket"},
 		{"  a", "assign / unassign the card"},
 		{"  s", "move the card to another column"},
+		{"  p", "set a field (Priority, Size, …)"},
+		{"  c", "add a comment to the ticket"},
 		{"  m", "toggle: show only my tickets"},
 		{"  o", "open the ticket in your browser"},
 		{"  r", "refresh the board"},

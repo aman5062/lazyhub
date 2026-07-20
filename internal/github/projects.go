@@ -282,6 +282,76 @@ query($id: ID!) {
 	return sf, nil
 }
 
+// SingleSelectField is any single-select custom field on a board (Status,
+// Priority, Size, …) with its selectable options.
+type SingleSelectField struct {
+	ID      string
+	Name    string
+	Options []StatusOption
+}
+
+// ListSingleSelectFields returns every single-select field on the project, so
+// the user can set Priority/Size/etc — not just Status. Options are synced
+// live from GitHub, so custom values always match the board.
+func (c *Client) ListSingleSelectFields(ctx context.Context, projectID string) ([]SingleSelectField, error) {
+	const q = `
+query($id: ID!) {
+  node(id: $id) {
+    ... on ProjectV2 {
+      fields(first: 50) {
+        nodes {
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            options { id name }
+          }
+        }
+      }
+    }
+  }
+}`
+	var data struct {
+		Node struct {
+			Fields struct {
+				Nodes []struct {
+					ID      string `json:"id"`
+					Name    string `json:"name"`
+					Options []struct {
+						ID   string `json:"id"`
+						Name string `json:"name"`
+					} `json:"options"`
+				} `json:"nodes"`
+			} `json:"fields"`
+		} `json:"node"`
+	}
+	if err := c.graphql(ctx, q, map[string]any{"id": projectID}, &data); err != nil {
+		return nil, err
+	}
+	var out []SingleSelectField
+	for _, f := range data.Node.Fields.Nodes {
+		if f.ID == "" {
+			continue // non-single-select fields decode as empty
+		}
+		sf := SingleSelectField{ID: f.ID, Name: f.Name}
+		for _, o := range f.Options {
+			sf.Options = append(sf.Options, StatusOption{ID: o.ID, Name: o.Name})
+		}
+		out = append(out, sf)
+	}
+	return out, nil
+}
+
+// AddDraftIssue creates a draft ticket directly on the board.
+func (c *Client) AddDraftIssue(ctx context.Context, projectID, title, body string) error {
+	const m = `
+mutation($project: ID!, $title: String!, $body: String) {
+  addProjectV2DraftIssue(input: { projectId: $project, title: $title, body: $body }) {
+    projectItem { id }
+  }
+}`
+	return c.graphql(ctx, m, map[string]any{"project": projectID, "title": title, "body": body}, nil)
+}
+
 // SetItemStatus moves a ticket to a different column.
 func (c *Client) SetItemStatus(ctx context.Context, projectID, itemID, fieldID, optionID string) error {
 	const m = `

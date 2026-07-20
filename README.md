@@ -21,9 +21,17 @@ columns** — all from the keyboard. Log in once, then never again.
 ## What it does
 
 - **Projects list** — every board you own, plus your orgs' boards.
-- **Board view** — tickets grouped by their **Status** column.
+- **Kanban board** — tickets in colored columns (your real Status options), a
+  distribution bar with `% done`, and avatar chips per assignee.
+- **`n` new** — create a draft ticket straight onto the board.
 - **`a` assign** — toggle who's assigned to the selected ticket.
-- **`s` move column** — change a ticket's Status (Todo → In Progress → Done).
+- **`s` status** — move a ticket to another column.
+- **`p` field** — set any single-select field (Priority, Size, …), options
+  synced live from your board.
+- **`c` comment** — add a comment to the ticket.
+- **`m` mine** — filter to just your tickets.
+- **Auto-sync** — the board silently refreshes every 30s (with cursor kept in
+  place), so a teammate's new ticket shows up on its own.
 - **`o` open** — jump to the ticket on github.com.
 
 ## Auth — read this
@@ -70,25 +78,29 @@ lazyhub whoami   Show current account
 |---|---|---|
 | Projects | `enter` | Open the board |
 | Projects | `/` | Filter boards by name |
+| Projects | `o` | Open board on github.com |
 | Board | `←`/`→` (`h`/`l`) | Move between columns |
 | Board | `↑`/`↓` (`k`/`j`) | Move between cards |
+| Board | `n` | Create a new draft ticket |
 | Board | `a` | Assign / unassign the card |
 | Board | `s` | Move the card to another column |
+| Board | `p` | Set a field (Priority, Size, …) |
+| Board | `c` | Add a comment to the ticket |
 | Board | `m` | Toggle: show only my tickets |
 | Board | `o` | Open ticket in browser |
-| Board | `r` | Refresh |
+| Board | `r` | Refresh now (also auto every 30s) |
 | Board | `esc` | Back to projects |
 | Any | `?` | Toggle help overlay |
+| Any | `X` | Log out (press twice) |
 | Any | `ctrl+c` | Quit |
 
 ## Roadmap
 
-- [ ] Create a ticket (draft or real issue) from the board
-- [ ] Edit custom fields beyond Status (priority, iteration, etc.)
-- [ ] Comment on a ticket inline
+- [ ] View existing comments inline (currently add-only)
 - [ ] Filter board by assignee / status
+- [ ] Create a *real* repo issue (not just a draft) from the board
 - [ ] OS keychain storage (libsecret / Keychain / WinCred)
-- [ ] Prebuilt release binaries + `brew` / `scoop`
+- [x] Prebuilt release binaries (see Releases)
 
 ## License
 
