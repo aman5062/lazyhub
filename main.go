@@ -15,6 +15,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// version is overridden at build time via -ldflags "-X main.version=..."
+// (GoReleaser sets it to the git tag on release).
+var version = "dev"
+
 const usage = `lazyhub — GitHub in your terminal
 
 Usage:
@@ -22,6 +26,7 @@ Usage:
   lazyhub login      Authenticate with GitHub (PAT or device flow)
   lazyhub logout     Remove the stored credential
   lazyhub whoami     Show the logged-in account
+  lazyhub version    Print the version
   lazyhub help       Show this help
 `
 
@@ -44,6 +49,8 @@ func main() {
 		fmt.Println("Logged out.")
 	case "whoami":
 		whoami()
+	case "version", "-v", "--version":
+		fmt.Printf("lazyhub %s\n", version)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
