@@ -115,28 +115,63 @@ func SelfUpdate(ctx context.Context, current string) (string, error) {
 		return latest, ErrUpToDate
 	}
 
-	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, latest, assetName())
-	bin, err := downloadBinary(ctx, url)
-	if err != nil {
-		return latest, err
-	}
-
 	exe, err := os.Executable()
 	if err != nil {
 		return latest, err
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
+	// Fail fast (before a multi-MB download) if we can't write where the
+	// binary lives — the usual case for /usr/local/bin owned by root.
+	if err := checkWritable(exe); err != nil {
+		return latest, err
+	}
+
+	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, latest, assetName())
+	bin, err := downloadBinary(ctx, url)
+	if err != nil {
+		return latest, err
+	}
+
 	// Write next to the target, then rename over it (atomic on the same fs).
 	newPath := exe + ".new"
 	if err := os.WriteFile(newPath, bin, 0o755); err != nil {
-		return latest, fmt.Errorf("write update (need permission for %s?): %w", filepath.Dir(exe), err)
+		if errors.Is(err, os.ErrPermission) {
+			return latest, permErr(exe)
+		}
+		return latest, fmt.Errorf("write update to %s: %w", filepath.Dir(exe), err)
 	}
 	if err := os.Rename(newPath, exe); err != nil {
 		os.Remove(newPath)
-		return latest, fmt.Errorf("replace binary (try: sudo lazyhub upgrade): %w", err)
+		if errors.Is(err, os.ErrPermission) {
+			return latest, permErr(exe)
+		}
+		return latest, fmt.Errorf("replace %s: %w", exe, err)
 	}
 	return latest, nil
+}
+
+// checkWritable verifies we can create files in the directory holding exe,
+// returning a friendly sudo hint when we can't.
+func checkWritable(exe string) error {
+	dir := filepath.Dir(exe)
+	probe := filepath.Join(dir, ".lazyhub-write-test")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return permErr(exe)
+		}
+		return fmt.Errorf("cannot write to %s: %w", dir, err)
+	}
+	f.Close()
+	os.Remove(probe)
+	return nil
+}
+
+// permErr is the actionable message shown when the install location isn't
+// writable by the current user.
+func permErr(exe string) error {
+	return fmt.Errorf("%s is not writable by your user — re-run with elevated permissions:\n    sudo lazyhub update", exe)
 }
 
 func downloadBinary(ctx context.Context, url string) ([]byte, error) {
