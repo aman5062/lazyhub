@@ -467,6 +467,39 @@ query($id: ID!) {
 	return out, nil
 }
 
+// CreateIssue opens a real issue in a repository and returns its node id.
+// repoID is the repository's GraphQL node id (Repo.NodeID).
+func (c *Client) CreateIssue(ctx context.Context, repoID, title, body string) (string, error) {
+	const m = `
+mutation($repo: ID!, $title: String!, $body: String) {
+  createIssue(input: { repositoryId: $repo, title: $title, body: $body }) {
+    issue { id }
+  }
+}`
+	var data struct {
+		CreateIssue struct {
+			Issue struct {
+				ID string `json:"id"`
+			} `json:"issue"`
+		} `json:"createIssue"`
+	}
+	if err := c.graphql(ctx, m, map[string]any{"repo": repoID, "title": title, "body": body}, &data); err != nil {
+		return "", err
+	}
+	return data.CreateIssue.Issue.ID, nil
+}
+
+// AddItemToProject adds an existing issue/PR (by content node id) onto a board.
+func (c *Client) AddItemToProject(ctx context.Context, projectID, contentID string) error {
+	const m = `
+mutation($project: ID!, $content: ID!) {
+  addProjectV2ItemById(input: { projectId: $project, contentId: $content }) {
+    item { id }
+  }
+}`
+	return c.graphql(ctx, m, map[string]any{"project": projectID, "content": contentID}, nil)
+}
+
 // AddDraftIssue creates a draft ticket directly on the board.
 func (c *Client) AddDraftIssue(ctx context.Context, projectID, title, body string) error {
 	const m = `

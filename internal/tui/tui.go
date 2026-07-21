@@ -9,6 +9,8 @@
 //   - Detail:    enter on a card — full body, labels, meta, and comments.
 //   - Assignee picker (a): toggle who's assigned.
 //   - Status picker   (s): move the card to another column.
+//   - Filter picker   (f): narrow the board to one assignee.
+//   - Repo picker     (i): choose a repo to open a real issue in.
 //   - Help overlay    (?): all keybindings.
 package tui
 
@@ -18,6 +20,7 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,6 +45,8 @@ const (
 	screenFieldPick // pick which single-select field to edit (via `p`)
 	screenInput     // free text: create a draft ticket, or add a comment
 	screenDetail    // read-only full view of a ticket (body, labels, comments)
+	screenFilter    // pick an assignee to filter the board by (via `f`)
+	screenRepoPick  // pick a repo to open a real issue in (via `i`)
 )
 
 type inputPurpose int
@@ -49,7 +54,11 @@ type inputPurpose int
 const (
 	inputCreate inputPurpose = iota
 	inputComment
+	inputIssue // create a real repo issue (into m.pendingRepo)
 )
+
+// clearFilter is the sentinel label for the "show everyone" row in the filter.
+const clearFilter = "★ Everyone"
 
 const (
 	minColWidth = 24
@@ -144,6 +153,10 @@ type detailLoadedMsg struct {
 	detail *github.ItemDetail
 	err    error
 }
+type reposLoadedMsg struct {
+	repos []github.Repo
+	err   error
+}
 type actionMsg struct {
 	text   string
 	kind   string // ok | err | info
@@ -182,7 +195,7 @@ type Model struct {
 	statusFld  *github.StatusField
 	colCursor  int
 	cardCursor int
-	filterMine bool
+	filterAssignee string // "" = show everyone; else only this login's cards
 
 	picker       list.Model
 	pendingField *github.SingleSelectField // field whose option is being picked
@@ -194,6 +207,8 @@ type Model struct {
 	detailItem    github.ProjectItem
 	detailVP      viewport.Model
 	detailLoading bool
+
+	pendingRepo github.Repo // repo chosen for a new real issue
 }
 
 func New(client *github.Client, login, version string) Model {
@@ -295,6 +310,15 @@ func (m Model) loadDetail(it github.ProjectItem) tea.Cmd {
 	}
 }
 
+func (m Model) loadRepos() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		repos, err := m.client.ListWritableRepos(ctx)
+		return reposLoadedMsg{repos: repos, err: err}
+	}
+}
+
 // newTextInput builds the input for creating a ticket / adding a comment.
 func (m *Model) openInput(purpose inputPurpose, placeholder string) {
 	ti := textinput.New()
@@ -327,11 +351,11 @@ func (m Model) openDetail(it github.ProjectItem) (tea.Model, tea.Cmd) {
 // any leftover statuses (e.g. "No Status") appended at the end.
 func (m *Model) rebuildColumns() {
 	items := m.rawItems
-	if m.filterMine {
+	if m.filterAssignee != "" {
 		f := make([]github.ProjectItem, 0, len(items))
 		for _, it := range items {
 			for _, a := range it.Assignees {
-				if a == m.login {
+				if a == m.filterAssignee {
 					f = append(f, it)
 					break
 				}
@@ -544,6 +568,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		return m, nil
 
+	case reposLoadedMsg:
+		if msg.err != nil {
+			return m, m.tempStatus("repos: "+msg.err.Error(), "err")
+		}
+		if len(msg.repos) == 0 {
+			return m, m.tempStatus("no repos you can open issues in", "err")
+		}
+		var li []list.Item
+		for _, r := range msg.repos {
+			li = append(li, pickItem{label: r.FullName, id: r.NodeID})
+		}
+		m.picker = m.newPicker("Open an issue in…", li)
+		m.scr = screenRepoPick
+		m.resize()
+		return m, nil
+
 	case detailLoadedMsg:
 		// Ignore a load that resolved after the user moved on to another card.
 		if msg.itemID != m.detailItem.ItemID {
@@ -580,7 +620,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.scr {
 	case screenProjects:
 		m.projects, cmd = m.projects.Update(msg)
-	case screenAssignee, screenStatus, screenFieldPick:
+	case screenAssignee, screenStatus, screenFieldPick, screenFilter, screenRepoPick:
 		m.picker, cmd = m.picker.Update(msg)
 	case screenInput:
 		m.input, cmd = m.input.Update(msg)
@@ -605,8 +645,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	pickerScreen := m.scr == screenAssignee || m.scr == screenStatus ||
+		m.scr == screenFieldPick || m.scr == screenFilter || m.scr == screenRepoPick
 	filtering := (m.scr == screenProjects && m.projects.FilterState() == list.Filtering) ||
-		((m.scr == screenAssignee || m.scr == screenStatus || m.scr == screenFieldPick) && m.picker.FilterState() == list.Filtering)
+		(pickerScreen && m.picker.FilterState() == list.Filtering)
 
 	if !filtering && (key == "ctrl+c") {
 		return m, tea.Quit
@@ -679,13 +721,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncing = true
 			return m, tea.Batch(m.loadBoard(m.curProject, true), m.spin.Tick)
 		case "m":
-			m.filterMine = !m.filterMine
+			if m.filterAssignee == m.login {
+				m.filterAssignee = ""
+			} else {
+				m.filterAssignee = m.login
+			}
 			m.rebuildColumns()
 			label := "Showing all tickets"
-			if m.filterMine {
+			if m.filterAssignee != "" {
 				label = "Showing only my tickets"
 			}
 			return m, m.tempStatus(label, "info")
+		case "f":
+			return m.openAssigneeFilter()
+		case "i":
+			m.loading = false
+			return m, m.loadRepos()
 		case "enter":
 			if it, ok := m.selectedItem(); ok {
 				return m.openDetail(it)
@@ -786,8 +837,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.tempStatus("type something first", "err")
 			}
 			m.scr = screenBoard
-			if m.inputPurpose == inputCreate {
+			switch m.inputPurpose {
+			case inputCreate:
 				return m, m.createTicket(val)
+			case inputIssue:
+				return m, m.createIssue(val)
 			}
 			if it, ok := m.selectedItem(); ok {
 				return m, m.postComment(it, val)
@@ -796,6 +850,51 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+
+	case screenFilter:
+		switch key {
+		case "esc":
+			m.scr = screenBoard
+			return m, nil
+		case "enter":
+			if !filtering {
+				if pi, ok := m.picker.SelectedItem().(pickItem); ok {
+					if pi.label == clearFilter {
+						m.filterAssignee = ""
+					} else {
+						m.filterAssignee = pi.label
+					}
+					m.rebuildColumns()
+					m.scr = screenBoard
+					label := "Showing all tickets"
+					if m.filterAssignee != "" {
+						label = "Filtered to @" + m.filterAssignee
+					}
+					return m, m.tempStatus(label, "info")
+				}
+			}
+		}
+		var cmd tea.Cmd
+		m.picker, cmd = m.picker.Update(msg)
+		return m, cmd
+
+	case screenRepoPick:
+		switch key {
+		case "esc":
+			m.scr = screenBoard
+			return m, nil
+		case "enter":
+			if !filtering {
+				if pi, ok := m.picker.SelectedItem().(pickItem); ok {
+					m.pendingRepo = github.Repo{NodeID: pi.id, FullName: pi.label}
+					m.openInput(inputIssue, "New issue title in "+pi.label+"…")
+					return m, textinput.Blink
+				}
+			}
+		}
+		var cmd tea.Cmd
+		m.picker, cmd = m.picker.Update(msg)
 		return m, cmd
 
 	case screenAssignee:
@@ -849,6 +948,33 @@ func (m *Model) curColumn() *boardColumn {
 		return &m.columns[m.colCursor]
 	}
 	return nil
+}
+
+// openAssigneeFilter shows every assignee present on the board (plus an
+// "Everyone" row to clear), so you can focus on one person's cards.
+func (m Model) openAssigneeFilter() (tea.Model, tea.Cmd) {
+	seen := map[string]bool{}
+	var logins []string
+	for _, it := range m.rawItems {
+		for _, a := range it.Assignees {
+			if !seen[a] {
+				seen[a] = true
+				logins = append(logins, a)
+			}
+		}
+	}
+	sort.Strings(logins)
+	li := []list.Item{pickItem{label: clearFilter, selected: m.filterAssignee == ""}}
+	for _, a := range logins {
+		li = append(li, pickItem{label: a, selected: a == m.filterAssignee})
+	}
+	if len(logins) == 0 {
+		return m, m.tempStatus("no assignees on this board yet", "info")
+	}
+	m.picker = m.newPicker("Filter by assignee", li)
+	m.scr = screenFilter
+	m.resize()
+	return m, nil
 }
 
 func (m Model) openStatusPicker() (tea.Model, tea.Cmd) {
@@ -935,6 +1061,25 @@ func (m Model) createTicket(title string) tea.Cmd {
 	}
 }
 
+// createIssue opens a real issue in m.pendingRepo and adds it to the board.
+func (m Model) createIssue(title string) tea.Cmd {
+	proj := m.curProject
+	repo := m.pendingRepo
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		issueID, err := m.client.CreateIssue(ctx, repo.NodeID, title, "")
+		if err != nil {
+			return actionMsg{text: "create issue failed: " + err.Error(), kind: "err"}
+		}
+		if err := m.client.AddItemToProject(ctx, proj.ID, issueID); err != nil {
+			// The issue exists; it just isn't on the board. Say so honestly.
+			return actionMsg{text: "issue created, but adding to board failed: " + err.Error(), kind: "err", reload: true}
+		}
+		return actionMsg{text: "Created issue in " + repo.FullName, kind: "ok", reload: true}
+	}
+}
+
 // postComment adds a comment to the selected issue/PR.
 func (m Model) postComment(it github.ProjectItem, body string) tea.Cmd {
 	return func() tea.Msg {
@@ -1004,7 +1149,8 @@ func (m *Model) resize() {
 		bodyH = 3
 	}
 	m.projects.SetSize(m.width-2, bodyH)
-	if m.scr == screenAssignee || m.scr == screenStatus || m.scr == screenFieldPick {
+	switch m.scr {
+	case screenAssignee, screenStatus, screenFieldPick, screenFilter, screenRepoPick:
 		w, h := m.pickerSize()
 		m.picker.SetSize(w, h)
 	}
@@ -1062,8 +1208,11 @@ func (m Model) View() string {
 	}
 
 	scope := "Projects"
-	if m.filterMine {
+	switch {
+	case m.filterAssignee == m.login && m.filterAssignee != "":
 		scope = "Projects · mine"
+	case m.filterAssignee != "":
+		scope = "Projects · @" + m.filterAssignee
 	}
 	header := titleStyle.Render("lazyhub") + statusBar.Render(" @"+m.login+"  ·  "+scope)
 	if m.updateAvail != "" {
@@ -1081,7 +1230,7 @@ func (m Model) View() string {
 		}
 	case screenBoard:
 		body = m.boardView()
-	case screenAssignee, screenStatus, screenFieldPick:
+	case screenAssignee, screenStatus, screenFieldPick, screenFilter, screenRepoPick:
 		body = paneBorderActive.Padding(0, 1).Render(m.picker.View())
 	case screenInput:
 		body = m.inputView()
@@ -1095,11 +1244,15 @@ func (m Model) View() string {
 func (m Model) inputView() string {
 	heading := "Create a draft ticket"
 	hint := "Adds a draft card to this board."
-	if m.inputPurpose == inputComment {
+	switch m.inputPurpose {
+	case inputComment:
 		heading = "Add a comment"
 		if it, ok := m.selectedItem(); ok {
 			hint = fmt.Sprintf("On %s/%s #%d", it.RepoOwner, it.RepoName, it.Number)
 		}
+	case inputIssue:
+		heading = "Open a new issue"
+		hint = "Creates a real issue in " + m.pendingRepo.FullName + " and adds it to this board."
 	}
 	box := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Render(heading),
@@ -1254,7 +1407,7 @@ func (m Model) boardView() string {
 		detailLabel.Render("   "+m.syncIndicator())
 	if len(m.columns) == 0 {
 		hint := "  No tickets match."
-		if !m.filterMine {
+		if m.filterAssignee == "" {
 			hint = "  This board has no tickets yet."
 		}
 		return title + "\n\n" + hint
@@ -1539,9 +1692,13 @@ func (m Model) helpBar() string {
 	case screenProjects:
 		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "open"}, {"o", "web"}, {"?", "help"}, {"X", "logout"}, {"q", "quit"}}
 	case screenBoard:
-		pairs = [][2]string{{"←→↑↓", "nav"}, {"↵", "details"}, {"n", "new"}, {"a", "assign"}, {"s", "status"}, {"p", "field"}, {"c", "comment"}, {"m", "mine"}, {"o", "open"}, {"?", "help"}}
+		pairs = [][2]string{{"←→↑↓", "nav"}, {"↵", "details"}, {"n", "draft"}, {"i", "issue"}, {"a", "assign"}, {"s", "status"}, {"c", "comment"}, {"f", "filter"}, {"m", "mine"}, {"o", "open"}, {"?", "help"}}
 	case screenDetail:
 		pairs = [][2]string{{"↑↓", "scroll"}, {"c", "comment"}, {"a", "assign"}, {"o", "open web"}, {"r", "refresh"}, {"esc", "back"}}
+	case screenFilter:
+		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "apply"}, {"esc", "back"}}
+	case screenRepoPick:
+		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "choose repo"}, {"esc", "back"}}
 	case screenAssignee:
 		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "toggle"}, {"esc", "back"}}
 	case screenStatus:
@@ -1571,10 +1728,12 @@ func (m Model) helpOverlay() string {
 		{"  ↑ / ↓ (k/j)", "move between cards"},
 		{"  enter", "open ticket details (body + comments)"},
 		{"  n", "create a new draft ticket"},
+		{"  i", "open a real repo issue onto the board"},
 		{"  a", "assign / unassign the card"},
 		{"  s", "move the card to another column"},
 		{"  p", "set a field (Priority, Size, …)"},
 		{"  c", "add a comment to the ticket"},
+		{"  f", "filter the board by assignee"},
 		{"  m", "toggle: show only my tickets"},
 		{"  o", "open the ticket in your browser"},
 		{"  r", "refresh the board"},

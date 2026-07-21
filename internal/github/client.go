@@ -87,6 +87,7 @@ func (c *Client) Me(ctx context.Context) (*User, string, error) {
 type Repo struct {
 	Name            string `json:"name"`
 	FullName        string `json:"full_name"`
+	NodeID          string `json:"node_id"` // GraphQL id, needed to create issues
 	Private         bool   `json:"private"`
 	Description     string `json:"description"`
 	Language        string `json:"language"`
@@ -94,10 +95,43 @@ type Repo struct {
 	OpenIssues      int    `json:"open_issues_count"`
 	Fork            bool   `json:"fork"`
 	Archived        bool   `json:"archived"`
+	HasIssues       bool   `json:"has_issues"`
 	PushedAt        string `json:"pushed_at"`
 	HTMLURL         string `json:"html_url"`
 	SSHURL          string `json:"ssh_url"`
 	DefaultBranch   string `json:"default_branch"`
+	Permissions     struct {
+		Admin    bool `json:"admin"`
+		Maintain bool `json:"maintain"`
+		Push     bool `json:"push"`
+		Triage   bool `json:"triage"`
+	} `json:"permissions"`
+}
+
+// CanFileIssues reports whether the viewer may open issues in this repo:
+// issues enabled, not archived, and at least triage/write access.
+func (r Repo) CanFileIssues() bool {
+	if r.Archived || !r.HasIssues {
+		return false
+	}
+	p := r.Permissions
+	return p.Push || p.Triage || p.Maintain || p.Admin
+}
+
+// ListWritableRepos returns the viewer's repos they can open issues in,
+// most-recently-pushed first — so filing a real issue is just picking one.
+func (c *Client) ListWritableRepos(ctx context.Context) ([]Repo, error) {
+	repos, err := c.ListRepos(ctx, 1, 100)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Repo, 0, len(repos))
+	for _, r := range repos {
+		if r.CanFileIssues() {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 // doJSON is like do but sends a JSON body.

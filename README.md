@@ -28,20 +28,26 @@ columns** — all from the keyboard. Log in once, then never again.
   story of a task without leaving the terminal. Scroll with `↑`/`↓`; comment
   with `c` right there.
 - **`n` new** — create a draft ticket straight onto the board.
+- **`i` issue** — open a **real repo issue** (pick the repo) and drop it onto
+  the board in one step — not just a draft.
 - **`a` assign** — toggle who's assigned to the selected ticket.
 - **`s` status** — move a ticket to another column.
 - **`p` field** — set any single-select field (Priority, Size, …), options
   synced live from your board.
 - **`c` comment** — add a comment to the ticket.
-- **`m` mine** — filter to just your tickets.
+- **`f` filter** — narrow the board to one assignee's cards; **`m` mine** is the
+  one-key shortcut for your own.
 - **Auto-sync** — the board silently refreshes every 30s (with cursor kept in
   place), so a teammate's new ticket shows up on its own.
 - **`o` open** — jump to the ticket on github.com.
 
 ## Auth — read this
 
-lazyhub needs a **GitHub token** (an SSH key can't talk to the API). It's
-stored at `~/.config/lazyhub/auth.json` (perms `0600`), so you log in once.
+lazyhub needs a **GitHub token** (an SSH key can't talk to the API). The token
+is kept in your **OS keychain** when one is available (GNOME Keyring / libsecret
+on Linux, Keychain on macOS, Credential Manager on Windows); non-secret metadata
+lives at `~/.config/lazyhub/auth.json`. On headless boxes with no keychain,
+lazyhub falls back to that same file (perms `0600`). Either way you log in once.
 
 > **Important:** GitHub Projects (v2) are **GraphQL-only** and require the
 > **`project`** scope. A `repo`-only token will not see your boards.
@@ -135,10 +141,12 @@ lazyhub checks for a newer release on startup and shows an unobtrusive
 | Board | `↑`/`↓` (`k`/`j`) | Move between cards |
 | Board | `enter` | Open ticket details (body + comments) |
 | Board | `n` | Create a new draft ticket |
+| Board | `i` | Open a real repo issue onto the board |
 | Board | `a` | Assign / unassign the card |
 | Board | `s` | Move the card to another column |
 | Board | `p` | Set a field (Priority, Size, …) |
 | Board | `c` | Add a comment to the ticket |
+| Board | `f` | Filter the board by assignee |
 | Board | `m` | Toggle: show only my tickets |
 | Board | `o` | Open ticket in browser |
 | Board | `r` | Refresh now (also auto every 30s) |
@@ -156,9 +164,9 @@ lazyhub checks for a newer release on startup and shows an unobtrusive
 ## Roadmap
 
 - [x] View a ticket's full description & comments inline (press `enter`)
-- [ ] Filter board by assignee / status
-- [ ] Create a *real* repo issue (not just a draft) from the board
-- [ ] OS keychain storage (libsecret / Keychain / WinCred)
+- [x] Filter board by assignee (press `f`; `m` for your own)
+- [x] Create a *real* repo issue (not just a draft) from the board (press `i`)
+- [x] OS keychain storage (libsecret / Keychain / WinCred, with file fallback)
 - [x] Prebuilt release binaries (see Releases)
 
 ## License
