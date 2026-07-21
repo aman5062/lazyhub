@@ -27,7 +27,7 @@ Usage:
   lazyhub login      Authenticate with GitHub (PAT or device flow)
   lazyhub logout     Remove the stored credential
   lazyhub whoami     Show the logged-in account
-  lazyhub upgrade    Update to the latest release
+  lazyhub update     Update to the latest release (alias: upgrade)
   lazyhub version    Print the version
   lazyhub help       Show this help
 `

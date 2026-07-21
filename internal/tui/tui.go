@@ -38,7 +38,8 @@ import (
 type screen int
 
 const (
-	screenProjects screen = iota
+	screenSplash screen = iota // branded welcome shown while the first load runs
+	screenProjects
 	screenBoard
 	screenAssignee
 	screenStatus    // pick an option for the current field (Status via `s`, or any field via `p`)
@@ -59,6 +60,25 @@ const (
 
 // clearFilter is the sentinel label for the "show everyone" row in the filter.
 const clearFilter = "★ Everyone"
+
+// splashArt is the lazyhub wordmark shown on the welcome screen. Box-drawing
+// so it renders in any terminal without a special font.
+const splashArt = `╻  ┏━┓┏━┓╻ ╻╻ ╻╻ ╻╻
+┃  ┣━┫ ┏┛┗┳┛┣━┫┃ ┃┣━┓
+┗━╸╹ ╹┗━╸ ╹ ╹ ╹┗━┛┗━┛`
+
+// splashMinDuration keeps the welcome screen on-screen at least this long so a
+// fast (cached) load doesn't make it blink past. The board load runs behind it.
+const splashMinDuration = 900 * time.Millisecond
+
+// splashTips rotate under the wordmark — small "did you know" pointers.
+var splashTips = []string{
+	"↵ on a card opens its full story — body, labels & comments",
+	"press i to open a real repo issue straight onto the board",
+	"press f to filter by teammate · m for just your own cards",
+	"the board auto-syncs every 30s — teammates' cards just appear",
+	"press ? anytime for the full list of keys",
+}
 
 const (
 	minColWidth = 24
@@ -135,6 +155,13 @@ type boardLoadedMsg struct {
 
 type updateAvailMsg struct{ version string }
 
+// splashDoneMsg fires once the minimum welcome-screen time has elapsed.
+type splashDoneMsg struct{}
+
+func scheduleSplash() tea.Cmd {
+	return tea.Tick(splashMinDuration, func(time.Time) tea.Msg { return splashDoneMsg{} })
+}
+
 type autoSyncTickMsg struct{}
 
 func scheduleSync() tea.Cmd {
@@ -209,6 +236,12 @@ type Model struct {
 	detailLoading bool
 
 	pendingRepo github.Repo // repo chosen for a new real issue
+
+	// splash state: leave the welcome screen once both the min time has
+	// elapsed and the first project load has returned.
+	splashElapsed bool
+	projectsReady bool
+	splashTip     string
 }
 
 func New(client *github.Client, login, version string) Model {
@@ -226,20 +259,21 @@ func New(client *github.Client, login, version string) Model {
 	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
 
 	return Model{
-		client:   client,
-		login:    login,
-		version:  version,
-		scr:      screenProjects,
-		loading:  true,
-		projects: l,
-		spin:     sp,
+		client:    client,
+		login:     login,
+		version:   version,
+		scr:       screenSplash,
+		loading:   true,
+		projects:  l,
+		spin:      sp,
+		splashTip: splashTips[time.Now().UnixNano()%int64(len(splashTips))],
 	}
 }
 
 func (m Model) Init() tea.Cmd {
 	// One long-lived sync ticker for the app's lifetime; it only does work
 	// while a board is open and idle (see the autoSyncTickMsg handler).
-	return tea.Batch(m.loadProjects(), m.spin.Tick, scheduleSync(), m.checkUpdate())
+	return tea.Batch(m.loadProjects(), m.spin.Tick, scheduleSync(), scheduleSplash(), m.checkUpdate())
 }
 
 // checkUpdate asks GitHub (once, in the background) whether a newer release
@@ -254,6 +288,15 @@ func (m Model) checkUpdate() tea.Cmd {
 			return updateAvailMsg{}
 		}
 		return updateAvailMsg{version: latest}
+	}
+}
+
+// maybeLeaveSplash advances from the welcome screen to the projects list once
+// the first load has returned and the minimum splash time has passed. If the
+// load errored, m.err is already set and View renders the error regardless.
+func (m *Model) maybeLeaveSplash() {
+	if m.scr == screenSplash && m.splashElapsed && m.projectsReady {
+		m.scr = screenProjects
 	}
 }
 
@@ -478,8 +521,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case splashDoneMsg:
+		m.splashElapsed = true
+		m.maybeLeaveSplash()
+		return m, nil
+
 	case projectsLoadedMsg:
 		m.loading = false
+		m.projectsReady = true
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -488,7 +537,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, p := range msg.projects {
 			items = append(items, projItem{p})
 		}
-		return m, m.projects.SetItems(items)
+		cmd := m.projects.SetItems(items)
+		m.maybeLeaveSplash()
+		return m, cmd
 
 	case boardLoadedMsg:
 		m.loading = false
@@ -632,6 +683,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Welcome screen: ctrl+c quits; any other key skips ahead once the board
+	// has actually loaded (before that there's nothing to skip to).
+	if m.scr == screenSplash {
+		if key == "ctrl+c" {
+			return m, tea.Quit
+		}
+		if m.projectsReady {
+			m.splashElapsed = true
+			m.maybeLeaveSplash()
+		}
+		return m, nil
+	}
 
 	// Help overlay swallows keys.
 	if m.showHelp {
@@ -1194,9 +1258,50 @@ func (m Model) pickerSize() (int, int) {
 
 // --- view ---
 
+// splashView is the branded welcome screen shown on launch while the first
+// board load runs in the background. It centers the wordmark, a greeting for
+// the signed-in user, a rotating tip, and a live loading / ready line.
+func (m Model) splashView() string {
+	art := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render(splashArt)
+
+	tagline := lipgloss.NewStyle().Foreground(colorDim).
+		Render("your GitHub Projects, from the keyboard")
+
+	greeting := lipgloss.NewStyle().Foreground(colorFg).Render("Welcome back, ") +
+		lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render("@"+m.login)
+
+	// Status line: a spinner while the board loads, a green check once it's in.
+	var statusLine string
+	if m.projectsReady {
+		statusLine = lipgloss.NewStyle().Foreground(colorGreen).Render("✓ boards ready") +
+			lipgloss.NewStyle().Foreground(colorFaint).Render("  ·  press any key")
+	} else {
+		statusLine = lipgloss.NewStyle().Foreground(colorDim).
+			Render(m.spin.View() + " fetching your boards…")
+	}
+
+	tip := lipgloss.NewStyle().Foreground(colorFaint).Italic(true).
+		Render("tip · " + m.splashTip)
+
+	ver := lipgloss.NewStyle().Foreground(colorFaint).Render(m.version)
+
+	card := lipgloss.JoinVertical(lipgloss.Center,
+		art, "", tagline, "", greeting, "", statusLine, "", tip,
+	)
+	framed := paneBorderActive.Padding(1, 4).Render(card)
+
+	// Version sits quietly under the card.
+	block := lipgloss.JoinVertical(lipgloss.Center, framed, "", ver)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, block)
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "starting lazyhub…"
+	}
+	if m.scr == screenSplash && m.err == nil {
+		return m.splashView()
 	}
 	if m.showHelp {
 		return m.helpOverlay()

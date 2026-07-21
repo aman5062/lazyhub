@@ -41,6 +41,23 @@ func TestPreview(t *testing.T) {
 	fmt.Println(m.View())
 }
 
+// TestSplashPreview renders the welcome screen in both its loading and
+// ready states so we can eyeball the wordmark and layout.
+//
+//	go test ./internal/tui -run SplashPreview -v
+func TestSplashPreview(t *testing.T) {
+	m := New(github.New("x"), "aman5062", "v0.2.0")
+	m.width, m.height = 120, 30
+
+	fmt.Println("\n===== SPLASH (loading) =====")
+	fmt.Println(m.View())
+
+	m.projectsReady = true
+	m.loading = false
+	fmt.Println("\n===== SPLASH (ready) =====")
+	fmt.Println(m.View())
+}
+
 // TestDetailPreview renders the read-only ticket detail view with fake data.
 //
 //	go test ./internal/tui -run DetailPreview -v

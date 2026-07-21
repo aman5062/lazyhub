@@ -123,12 +123,16 @@ lazyhub          Launch the TUI (prompts login on first run)
 lazyhub login    Authenticate
 lazyhub logout   Remove stored token
 lazyhub whoami   Show current account
-lazyhub upgrade  Update to the latest release in place
+lazyhub update   Update to the latest release in place (alias: upgrade)
 lazyhub version  Print the version
 ```
 
 lazyhub checks for a newer release on startup and shows an unobtrusive
-`⬆ vX available` notice; run `lazyhub upgrade` to self-update.
+`⬆ vX available` notice; run `lazyhub update` to self-update.
+
+On launch you get a brief branded welcome screen (wordmark, a greeting, and a
+rotating tip) while your boards load in the background — press any key to jump
+straight in once it's ready.
 
 ## Keybindings
 
