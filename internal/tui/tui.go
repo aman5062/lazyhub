@@ -6,6 +6,7 @@
 // Screens:
 //   - Projects:  list of your boards (personal + orgs). Enter opens a board.
 //   - Board:     kanban columns. Act on the selected card.
+//   - Detail:    enter on a card — full body, labels, meta, and comments.
 //   - Assignee picker (a): toggle who's assigned.
 //   - Status picker   (s): move the card to another column.
 //   - Help overlay    (?): all keybindings.
@@ -26,6 +27,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -39,6 +41,7 @@ const (
 	screenStatus    // pick an option for the current field (Status via `s`, or any field via `p`)
 	screenFieldPick // pick which single-select field to edit (via `p`)
 	screenInput     // free text: create a draft ticket, or add a comment
+	screenDetail    // read-only full view of a ticket (body, labels, comments)
 )
 
 type inputPurpose int
@@ -136,6 +139,11 @@ type fieldsLoadedMsg struct {
 	fields []github.SingleSelectField
 	err    error
 }
+type detailLoadedMsg struct {
+	itemID string // the card this detail belongs to (guards against a stale load)
+	detail *github.ItemDetail
+	err    error
+}
 type actionMsg struct {
 	text   string
 	kind   string // ok | err | info
@@ -180,6 +188,12 @@ type Model struct {
 	pendingField *github.SingleSelectField // field whose option is being picked
 	input        textinput.Model
 	inputPurpose inputPurpose
+
+	// detail view state
+	detail        *github.ItemDetail
+	detailItem    github.ProjectItem
+	detailVP      viewport.Model
+	detailLoading bool
 }
 
 func New(client *github.Client, login, version string) Model {
@@ -271,6 +285,16 @@ func (m Model) loadFields() tea.Cmd {
 	}
 }
 
+func (m Model) loadDetail(it github.ProjectItem) tea.Cmd {
+	id := it.ItemID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		d, err := m.client.GetItemDetail(ctx, id)
+		return detailLoadedMsg{itemID: id, detail: d, err: err}
+	}
+}
+
 // newTextInput builds the input for creating a ticket / adding a comment.
 func (m *Model) openInput(purpose inputPurpose, placeholder string) {
 	ti := textinput.New()
@@ -281,6 +305,19 @@ func (m *Model) openInput(purpose inputPurpose, placeholder string) {
 	m.input = ti
 	m.inputPurpose = purpose
 	m.scr = screenInput
+}
+
+// openDetail switches to the read-only detail view for a card and kicks off
+// the fetch of its full body / labels / comments.
+func (m Model) openDetail(it github.ProjectItem) (tea.Model, tea.Cmd) {
+	m.detailItem = it
+	m.detail = nil
+	m.detailLoading = true
+	w, h := m.detailSize()
+	m.detailVP = viewport.New(w, h)
+	m.detailVP.SetContent(detailLabel.Render("  loading…"))
+	m.scr = screenDetail
+	return m, tea.Batch(m.loadDetail(it), m.spin.Tick)
 }
 
 // --- board helpers ---
@@ -401,7 +438,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		// Only animate while something is actually loading, to stay idle-quiet.
-		if !m.loading && !m.syncing {
+		if !m.loading && !m.syncing && !m.detailLoading {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -507,6 +544,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		return m, nil
 
+	case detailLoadedMsg:
+		// Ignore a load that resolved after the user moved on to another card.
+		if msg.itemID != m.detailItem.ItemID {
+			return m, nil
+		}
+		m.detailLoading = false
+		if msg.err != nil {
+			m.scr = screenBoard
+			return m, m.tempStatus("detail: "+msg.err.Error(), "err")
+		}
+		m.detail = msg.detail
+		m.detailVP.SetContent(m.renderDetailBody())
+		m.detailVP.GotoTop()
+		return m, nil
+
 	case actionMsg:
 		m.status, m.statKnd = msg.text, msg.kind
 		var cmds []tea.Cmd
@@ -532,6 +584,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.picker, cmd = m.picker.Update(msg)
 	case screenInput:
 		m.input, cmd = m.input.Update(msg)
+	case screenDetail:
+		m.detailVP, cmd = m.detailVP.Update(msg)
 	}
 	return m, cmd
 }
@@ -632,6 +686,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				label = "Showing only my tickets"
 			}
 			return m, m.tempStatus(label, "info")
+		case "enter":
+			if it, ok := m.selectedItem(); ok {
+				return m.openDetail(it)
+			}
 		case "o":
 			if it, ok := m.selectedItem(); ok && it.URL != "" {
 				return m, openBrowser(it.URL)
@@ -664,6 +722,37 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case screenDetail:
+		switch key {
+		case "esc", "q", "backspace":
+			m.scr = screenBoard
+			return m, nil
+		case "o":
+			if m.detailItem.URL != "" {
+				return m, openBrowser(m.detailItem.URL)
+			}
+			return m, nil
+		case "r":
+			// Re-fetch this ticket's detail (e.g. after someone commented).
+			m.detailLoading = true
+			m.detail = nil
+			return m, tea.Batch(m.loadDetail(m.detailItem), m.spin.Tick)
+		case "c":
+			if m.detailItem.Number == 0 {
+				return m, m.tempStatus("draft items have no comments", "err")
+			}
+			m.openInput(inputComment, "Write a comment…")
+			return m, textinput.Blink
+		case "a":
+			if m.detailItem.Number == 0 {
+				return m, m.tempStatus("draft items can't be assigned", "err")
+			}
+			return m, m.loadAssignees(m.detailItem)
+		}
+		var cmd tea.Cmd
+		m.detailVP, cmd = m.detailVP.Update(msg)
+		return m, cmd
 
 	case screenFieldPick:
 		switch key {
@@ -919,6 +1008,30 @@ func (m *Model) resize() {
 		w, h := m.pickerSize()
 		m.picker.SetSize(w, h)
 	}
+	if m.scr == screenDetail {
+		w, h := m.detailSize()
+		m.detailVP.Width, m.detailVP.Height = w, h
+		if m.detail != nil {
+			m.detailVP.SetContent(m.renderDetailBody())
+		}
+	}
+}
+
+// detailSize is the inner size of the scrollable detail body (inside the
+// bordered pane, below the fixed header block).
+func (m Model) detailSize() (int, int) {
+	w := m.width - 6
+	if w < 20 {
+		w = 20
+	}
+	if w > 100 {
+		w = 100
+	}
+	h := m.height - 12
+	if h < 4 {
+		h = 4
+	}
+	return w, h
 }
 
 func (m Model) pickerSize() (int, int) {
@@ -972,6 +1085,8 @@ func (m Model) View() string {
 		body = paneBorderActive.Padding(0, 1).Render(m.picker.View())
 	case screenInput:
 		body = m.inputView()
+	case screenDetail:
+		body = m.detailView()
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, m.statusView(), m.helpBar())
@@ -995,6 +1110,135 @@ func (m Model) inputView() string {
 		helpStyle.Render("enter submit · esc cancel"),
 	)
 	return "\n" + paneBorderActive.Padding(1, 2).Render(box)
+}
+
+// detailView renders the full read-only ticket view: a fixed header (title,
+// number, state, assignees, labels, meta) above a scrollable body that holds
+// the description and recent comments.
+func (m Model) detailView() string {
+	it := m.detailItem
+
+	num := "draft"
+	if it.Number > 0 {
+		num = "#" + itoa(it.Number)
+	}
+	kindLabel := "Issue"
+	kindIcon := "○"
+	switch {
+	case it.Type == "PULL_REQUEST":
+		kindLabel, kindIcon = "Pull request", "⇄"
+	case it.Type == "DRAFT_ISSUE" || it.Number == 0:
+		kindLabel, kindIcon = "Draft", "✎"
+	}
+	state := it.State
+	if state == "" {
+		state = "—"
+	}
+
+	titleLine := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).
+		Render(kindIcon+" "+it.Title) + "  " +
+		lipgloss.NewStyle().Foreground(colorDim).Render(num)
+
+	// One-line metadata: kind · state · repo · status column.
+	repo := "—"
+	if it.RepoOwner != "" {
+		repo = it.RepoOwner + "/" + it.RepoName
+	}
+	metaBits := []string{
+		detailLabel.Render(kindLabel),
+		stateChip(it.State) + " " + detailValue.Render(state),
+		detailLabel.Render("in ") + detailValue.Render(repo),
+		detailLabel.Render("· ") + lipgloss.NewStyle().Foreground(statusColor(it.Status)).Render(statusIcon(it.Status)+" "+it.Status),
+	}
+	metaLine := strings.Join(metaBits, "  ")
+
+	// Assignees + (if loaded) author/opened.
+	who := detailLabel.Render("Assignees ")
+	if len(it.Assignees) > 0 {
+		chips := make([]string, 0, len(it.Assignees))
+		for _, a := range it.Assignees {
+			chips = append(chips, avatarChip(a)+" "+detailValue.Render("@"+a))
+		}
+		who += strings.Join(chips, "  ")
+	} else {
+		who += lipgloss.NewStyle().Foreground(colorFaint).Render("unassigned")
+	}
+	if m.detail != nil && m.detail.Author != "" {
+		who += detailLabel.Render("   opened by ") + detailValue.Render("@"+m.detail.Author)
+		if t := humanTime(m.detail.CreatedAt); t != "" {
+			who += detailLabel.Render(" · "+t)
+		}
+	}
+
+	head := lipgloss.JoinVertical(lipgloss.Left, titleLine, "", metaLine, who)
+	if m.detail != nil && len(m.detail.Labels) > 0 {
+		head = lipgloss.JoinVertical(lipgloss.Left, head, "", m.renderLabels())
+	}
+
+	divider := lipgloss.NewStyle().Foreground(colorFaint).Render(strings.Repeat("─", min(m.width-4, 100)))
+	pane := lipgloss.JoinVertical(lipgloss.Left, head, divider, m.detailVP.View())
+	return "\n" + paneBorderActive.Padding(1, 2).Render(pane)
+}
+
+func (m Model) renderLabels() string {
+	chips := make([]string, 0, len(m.detail.Labels))
+	for _, l := range m.detail.Labels {
+		chips = append(chips, labelChip(l))
+	}
+	return detailLabel.Render("Labels ") + strings.Join(chips, " ")
+}
+
+// renderDetailBody builds the scrollable content: the description, then the
+// most recent comments. Kept plain-text (lightly styled) — no markdown engine.
+func (m Model) renderDetailBody() string {
+	w, _ := m.detailSize()
+	if m.detailLoading || m.detail == nil {
+		return detailLabel.Render("  " + m.spin.View() + " loading ticket…")
+	}
+	var b strings.Builder
+
+	b.WriteString(sectionHeading("Description"))
+	b.WriteString("\n")
+	body := strings.TrimSpace(m.detail.Body)
+	if body == "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorFaint).Italic(true).Render("No description provided."))
+	} else {
+		b.WriteString(detailValue.Render(wrapText(body, w)))
+	}
+
+	if m.detail.Milestone != "" {
+		b.WriteString("\n\n")
+		b.WriteString(detailLabel.Render("Milestone ") + detailValue.Render(m.detail.Milestone))
+	}
+
+	// Comments
+	b.WriteString("\n\n")
+	label := "Comments"
+	if m.detail.CommentTotal > 0 {
+		label = fmt.Sprintf("Comments (%d)", m.detail.CommentTotal)
+	}
+	b.WriteString(sectionHeading(label))
+	b.WriteString("\n")
+	if len(m.detail.Comments) == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorFaint).Italic(true).Render("No comments yet. Press c to add one."))
+	} else {
+		if m.detail.CommentTotal > len(m.detail.Comments) {
+			b.WriteString(detailLabel.Render(fmt.Sprintf("showing the latest %d of %d\n\n", len(m.detail.Comments), m.detail.CommentTotal)))
+		}
+		for i, c := range m.detail.Comments {
+			hdr := avatarChip(c.Author) + " " +
+				lipgloss.NewStyle().Bold(true).Foreground(colorFg).Render("@"+c.Author)
+			if t := humanTime(c.CreatedAt); t != "" {
+				hdr += detailLabel.Render("  " + t)
+			}
+			b.WriteString(hdr + "\n")
+			b.WriteString(detailValue.Render(wrapText(strings.TrimSpace(c.Body), w)))
+			if i < len(m.detail.Comments)-1 {
+				b.WriteString("\n\n")
+			}
+		}
+	}
+	return b.String()
 }
 
 func (m Model) boardView() string {
@@ -1197,6 +1441,69 @@ func (m Model) renderCard(it github.ProjectItem, w int, selected bool) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, bar, " ", content)
 }
 
+// wrapText word-wraps s to width w, preserving the author's own line breaks
+// (blank lines stay blank). Long unbreakable tokens are hard-split.
+func wrapText(s string, w int) string {
+	if w < 1 {
+		w = 1
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRight(line, " \t\r")
+		if line == "" {
+			out = append(out, "")
+			continue
+		}
+		var cur string
+		for _, word := range strings.Fields(line) {
+			// Hard-split a single word that's wider than the line.
+			for lipgloss.Width(word) > w {
+				r := []rune(word)
+				out = append(out, string(r[:w]))
+				word = string(r[w:])
+			}
+			switch {
+			case cur == "":
+				cur = word
+			case lipgloss.Width(cur)+1+lipgloss.Width(word) <= w:
+				cur += " " + word
+			default:
+				out = append(out, cur)
+				cur = word
+			}
+		}
+		if cur != "" {
+			out = append(out, cur)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// humanTime turns an ISO-8601 timestamp into a short relative label like
+// "3h ago" or "on 2026-01-04". Empty input (or unparseable) yields "".
+func humanTime(iso string) string {
+	if iso == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return "on " + t.Format("2006-01-02")
+	}
+}
+
 // truncate shortens s to at most w display cells, adding an ellipsis.
 func truncate(s string, w int) string {
 	if lipgloss.Width(s) <= w {
@@ -1232,7 +1539,9 @@ func (m Model) helpBar() string {
 	case screenProjects:
 		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "open"}, {"o", "web"}, {"?", "help"}, {"X", "logout"}, {"q", "quit"}}
 	case screenBoard:
-		pairs = [][2]string{{"←→↑↓", "nav"}, {"n", "new"}, {"a", "assign"}, {"s", "status"}, {"p", "field"}, {"c", "comment"}, {"m", "mine"}, {"o", "open"}, {"?", "help"}, {"esc", "back"}}
+		pairs = [][2]string{{"←→↑↓", "nav"}, {"↵", "details"}, {"n", "new"}, {"a", "assign"}, {"s", "status"}, {"p", "field"}, {"c", "comment"}, {"m", "mine"}, {"o", "open"}, {"?", "help"}}
+	case screenDetail:
+		pairs = [][2]string{{"↑↓", "scroll"}, {"c", "comment"}, {"a", "assign"}, {"o", "open web"}, {"r", "refresh"}, {"esc", "back"}}
 	case screenAssignee:
 		pairs = [][2]string{{"↑↓", "move"}, {"/", "filter"}, {"↵", "toggle"}, {"esc", "back"}}
 	case screenStatus:
@@ -1260,6 +1569,7 @@ func (m Model) helpOverlay() string {
 		{"Board (kanban)", ""},
 		{"  ← / → (h/l)", "move between columns"},
 		{"  ↑ / ↓ (k/j)", "move between cards"},
+		{"  enter", "open ticket details (body + comments)"},
 		{"  n", "create a new draft ticket"},
 		{"  a", "assign / unassign the card"},
 		{"  s", "move the card to another column"},
@@ -1269,6 +1579,14 @@ func (m Model) helpOverlay() string {
 		{"  o", "open the ticket in your browser"},
 		{"  r", "refresh the board"},
 		{"  esc / q", "back to projects"},
+		{"", ""},
+		{"Ticket details (enter)", ""},
+		{"  ↑ / ↓ (k/j)", "scroll the body & comments"},
+		{"  c", "add a comment"},
+		{"  a", "assign / unassign"},
+		{"  o", "open the ticket in your browser"},
+		{"  r", "reload the ticket"},
+		{"  esc / q", "back to the board"},
 		{"", ""},
 		{"Anywhere", ""},
 		{"  ?", "toggle this help"},

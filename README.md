@@ -6,16 +6,16 @@ columns** — all from the keyboard. Log in once, then never again.
 
 ```
  lazyhub   @aman5062  ·  Projects
-  Ananta HQ Roadmap  (@aman5062)
+  Product Roadmap  (@aman5062)
 
   Todo
-  ○ #14 Wire billing webhooks         unassigned    ananta-hq/gateway
-▶ ○ #15 Design onboarding flow        @aman5062  ananta-hq/home
+  ○ #14 Wire billing webhooks         unassigned    acme/gateway
+▶ ○ #15 Design onboarding flow        @aman5062     acme/home
   In Progress
-  ⇄ #22 Refactor auth middleware      @teammate     ananta-hq/gateway
+  ⇄ #22 Refactor auth middleware      @teammate     acme/gateway
   Done
-  ○ #9  Set up CI                      @aman5062  ananta-hq/tools
-  ↑/↓ move · a assign · s move column · o open · r refresh · esc back
+  ○ #9  Set up CI                      @aman5062     acme/tools
+  ↑/↓ move · ↵ details · a assign · s column · o open · esc back
 ```
 
 ## What it does
@@ -23,6 +23,10 @@ columns** — all from the keyboard. Log in once, then never again.
 - **Projects list** — every board you own, plus your orgs' boards.
 - **Kanban board** — tickets in colored columns (your real Status options), a
   distribution bar with `% done`, and avatar chips per assignee.
+- **`enter` details** — open a ticket to read its **full description**, labels,
+  milestone, who opened it and when, and the **latest comments** — the whole
+  story of a task without leaving the terminal. Scroll with `↑`/`↓`; comment
+  with `c` right there.
 - **`n` new** — create a draft ticket straight onto the board.
 - **`a` assign** — toggle who's assigned to the selected ticket.
 - **`s` status** — move a ticket to another column.
@@ -129,6 +133,7 @@ lazyhub checks for a newer release on startup and shows an unobtrusive
 | Projects | `o` | Open board on github.com |
 | Board | `←`/`→` (`h`/`l`) | Move between columns |
 | Board | `↑`/`↓` (`k`/`j`) | Move between cards |
+| Board | `enter` | Open ticket details (body + comments) |
 | Board | `n` | Create a new draft ticket |
 | Board | `a` | Assign / unassign the card |
 | Board | `s` | Move the card to another column |
@@ -138,13 +143,19 @@ lazyhub checks for a newer release on startup and shows an unobtrusive
 | Board | `o` | Open ticket in browser |
 | Board | `r` | Refresh now (also auto every 30s) |
 | Board | `esc` | Back to projects |
+| Details | `↑`/`↓` (`k`/`j`) | Scroll the body & comments |
+| Details | `c` | Add a comment |
+| Details | `a` | Assign / unassign |
+| Details | `o` | Open the ticket in the browser |
+| Details | `r` | Reload the ticket |
+| Details | `esc`/`q` | Back to the board |
 | Any | `?` | Toggle help overlay |
 | Any | `X` | Log out (press twice) |
 | Any | `ctrl+c` | Quit |
 
 ## Roadmap
 
-- [ ] View existing comments inline (currently add-only)
+- [x] View a ticket's full description & comments inline (press `enter`)
 - [ ] Filter board by assignee / status
 - [ ] Create a *real* repo issue (not just a draft) from the board
 - [ ] OS keychain storage (libsecret / Keychain / WinCred)

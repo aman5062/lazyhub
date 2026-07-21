@@ -4,6 +4,7 @@ import (
 	"hash/fnv"
 	"strings"
 
+	"github.com/aman5062/lazyhub/internal/github"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -170,6 +171,72 @@ func columnHeaderPill(name string, count, width int, active bool) string {
 		st = st.Faint(true)
 	}
 	return st.Render(label + countStr)
+}
+
+// sectionHeading renders an accent-underlined heading used in the detail body.
+func sectionHeading(s string) string {
+	return lipgloss.NewStyle().Bold(true).Foreground(colorAccent).
+		Render("▌ " + strings.ToUpper(s))
+}
+
+// stateChip renders a small colored dot for an issue/PR state.
+func stateChip(state string) string {
+	c := colorDim
+	switch strings.ToUpper(state) {
+	case "OPEN":
+		c = colorGreen
+	case "CLOSED":
+		c = colorRed
+	case "MERGED":
+		c = colorAccent
+	}
+	return lipgloss.NewStyle().Foreground(c).Render("●")
+}
+
+// labelChip renders a GitHub label using its own color (hex without '#'),
+// picking readable text based on the color's luminance.
+func labelChip(l github.Label) string {
+	hex := strings.TrimPrefix(l.Color, "#")
+	bg := lipgloss.Color("#" + hex)
+	fg := lipgloss.Color("#FFFFFF")
+	if isLightHex(hex) {
+		fg = colorInk
+	}
+	st := lipgloss.NewStyle().Foreground(fg).Bold(true).Padding(0, 1)
+	if len(hex) == 6 {
+		st = st.Background(bg)
+	} else {
+		st = st.Foreground(colorAccent) // no/short color: fall back to text-only
+	}
+	return st.Render(l.Name)
+}
+
+// isLightHex reports whether a 6-digit hex color is light enough to need dark text.
+func isLightHex(hex string) bool {
+	if len(hex) != 6 {
+		return false
+	}
+	r := hexPair(hex[0:2])
+	g := hexPair(hex[2:4])
+	b := hexPair(hex[4:6])
+	// Perceived luminance (ITU-R BT.601).
+	return (299*r+587*g+114*b)/1000 > 140
+}
+
+func hexPair(s string) int {
+	v := 0
+	for _, c := range s {
+		v <<= 4
+		switch {
+		case c >= '0' && c <= '9':
+			v |= int(c - '0')
+		case c >= 'a' && c <= 'f':
+			v |= int(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			v |= int(c-'A') + 10
+		}
+	}
+	return v
 }
 
 func itoa(n int) string {

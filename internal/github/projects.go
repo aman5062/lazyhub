@@ -230,6 +230,132 @@ query($id: ID!) {
 	return out, nil
 }
 
+// Label is an issue/PR label with its GitHub color (hex, no leading #).
+type Label struct {
+	Name  string
+	Color string
+}
+
+// Comment is a single issue/PR comment.
+type Comment struct {
+	Author    string
+	Body      string
+	CreatedAt string
+}
+
+// ItemDetail is the full read-only detail of a card's underlying issue/PR/draft
+// — everything the compact board card can't show: the body, who opened it and
+// when, its labels and milestone, and the most recent comments.
+type ItemDetail struct {
+	Body         string
+	Author       string
+	CreatedAt    string
+	Labels       []Label
+	Milestone    string
+	Comments     []Comment
+	CommentTotal int
+}
+
+// GetItemDetail fetches the full detail of a board item by its ProjectV2Item
+// node id. Works for issues, pull requests, and draft issues (drafts only have
+// a title, body, and creator — no labels/comments).
+func (c *Client) GetItemDetail(ctx context.Context, itemID string) (*ItemDetail, error) {
+	const q = `
+query($id: ID!) {
+  node(id: $id) {
+    ... on ProjectV2Item {
+      content {
+        __typename
+        ... on DraftIssue {
+          body
+          creator { login }
+          createdAt
+        }
+        ... on Issue {
+          body createdAt
+          author { login }
+          milestone { title }
+          labels(first: 20) { nodes { name color } }
+          comments(last: 20) {
+            totalCount
+            nodes { author { login } body createdAt }
+          }
+        }
+        ... on PullRequest {
+          body createdAt
+          author { login }
+          milestone { title }
+          labels(first: 20) { nodes { name color } }
+          comments(last: 20) {
+            totalCount
+            nodes { author { login } body createdAt }
+          }
+        }
+      }
+    }
+  }
+}`
+	var data struct {
+		Node struct {
+			Content struct {
+				Typename  string `json:"__typename"`
+				Body      string `json:"body"`
+				CreatedAt string `json:"createdAt"`
+				Author    struct {
+					Login string `json:"login"`
+				} `json:"author"`
+				Creator struct {
+					Login string `json:"login"`
+				} `json:"creator"`
+				Milestone struct {
+					Title string `json:"title"`
+				} `json:"milestone"`
+				Labels struct {
+					Nodes []struct {
+						Name  string `json:"name"`
+						Color string `json:"color"`
+					} `json:"nodes"`
+				} `json:"labels"`
+				Comments struct {
+					TotalCount int `json:"totalCount"`
+					Nodes      []struct {
+						Author struct {
+							Login string `json:"login"`
+						} `json:"author"`
+						Body      string `json:"body"`
+						CreatedAt string `json:"createdAt"`
+					} `json:"nodes"`
+				} `json:"comments"`
+			} `json:"content"`
+		} `json:"node"`
+	}
+	if err := c.graphql(ctx, q, map[string]any{"id": itemID}, &data); err != nil {
+		return nil, err
+	}
+	cn := data.Node.Content
+	d := &ItemDetail{
+		Body:         cn.Body,
+		Author:       cn.Author.Login,
+		CreatedAt:    cn.CreatedAt,
+		Milestone:    cn.Milestone.Title,
+		CommentTotal: cn.Comments.TotalCount,
+	}
+	if d.Author == "" { // drafts expose the opener as `creator`
+		d.Author = cn.Creator.Login
+	}
+	for _, l := range cn.Labels.Nodes {
+		d.Labels = append(d.Labels, Label{Name: l.Name, Color: l.Color})
+	}
+	for _, cm := range cn.Comments.Nodes {
+		d.Comments = append(d.Comments, Comment{
+			Author:    cm.Author.Login,
+			Body:      cm.Body,
+			CreatedAt: cm.CreatedAt,
+		})
+	}
+	return d, nil
+}
+
 // StatusOption is one column of the board (a Status single-select option).
 type StatusOption struct {
 	ID   string
