@@ -1,11 +1,11 @@
-# lazyhub
+# grit
 
 A **terminal UI for GitHub Projects**. Browse your project boards, see tickets
 grouped by status column, **assign them to people**, and **move them between
 columns** — all from the keyboard. Log in once, then never again.
 
 ```
- lazyhub   @aman5062  ·  Projects
+ grit   @aman5062  ·  Projects
   Product Roadmap  (@aman5062)
 
   Todo
@@ -43,11 +43,11 @@ columns** — all from the keyboard. Log in once, then never again.
 
 ## Auth — read this
 
-lazyhub needs a **GitHub token** (an SSH key can't talk to the API). The token
+grit needs a **GitHub token** (an SSH key can't talk to the API). The token
 is kept in your **OS keychain** when one is available (GNOME Keyring / libsecret
 on Linux, Keychain on macOS, Credential Manager on Windows); non-secret metadata
-lives at `~/.config/lazyhub/auth.json`. On headless boxes with no keychain,
-lazyhub falls back to that same file (perms `0600`). Either way you log in once.
+lives at `~/.config/grit/auth.json`. On headless boxes with no keychain,
+grit falls back to that same file (perms `0600`). Either way you log in once.
 
 > **Important:** GitHub Projects (v2) are **GraphQL-only** and require the
 > **`project`** scope. A `repo`-only token will not see your boards.
@@ -56,13 +56,13 @@ lazyhub falls back to that same file (perms `0600`). Either way you log in once.
 
 1. Create a token: https://github.com/settings/tokens
    Scopes: **`project`**, `repo`, `read:org`
-2. `lazyhub login` → choose **1** → paste it.
+2. `grit login` → choose **1** → paste it.
 
 ### Option B — Browser device flow (no token to paste)
 
-`gh`-style: lazyhub prints a short code, you approve in the browser, done — no
+`gh`-style: grit prints a short code, you approve in the browser, done — no
 copy-pasting secrets. Works out of the box (a public OAuth App Client ID ships
-with lazyhub). To use your own app instead, set `LAZYHUB_CLIENT_ID`.
+with grit). To use your own app instead, set `GRIT_CLIENT_ID`.
 
 ## Install
 
@@ -71,27 +71,27 @@ Pick whichever fits you — the first needs **neither Go nor git**.
 ### 1. Prebuilt binary (recommended)
 
 Download the archive for your OS/arch from the
-[**latest release**](https://github.com/aman5062/lazyhub/releases/latest),
-extract it, and put `lazyhub` on your `PATH`.
+[**latest release**](https://github.com/aman5062/grit/releases/latest),
+extract it, and put `grit` on your `PATH`.
 
 **Linux (amd64):**
 ```bash
-curl -L https://github.com/aman5062/lazyhub/releases/latest/download/lazyhub_linux_amd64.tar.gz | tar xz
-sudo mv lazyhub /usr/local/bin/
-lazyhub
+curl -L https://github.com/aman5062/grit/releases/latest/download/grit_linux_amd64.tar.gz | tar xz
+sudo mv grit /usr/local/bin/
+grit
 ```
 
 **macOS (Apple Silicon):**
 ```bash
-curl -L https://github.com/aman5062/lazyhub/releases/latest/download/lazyhub_darwin_arm64.tar.gz | tar xz
-sudo mv lazyhub /usr/local/bin/
-lazyhub
+curl -L https://github.com/aman5062/grit/releases/latest/download/grit_darwin_arm64.tar.gz | tar xz
+sudo mv grit /usr/local/bin/
+grit
 ```
 > On macOS, if Gatekeeper blocks it: `xcode-select --install` isn't needed —
-> just run `xattr -d com.apple.quarantine ./lazyhub` once.
+> just run `xattr -d com.apple.quarantine ./grit` once.
 
-**Windows:** download `lazyhub_windows_amd64.zip` from the release, unzip, and
-run `lazyhub.exe` (or add its folder to `PATH`).
+**Windows:** download `grit_windows_amd64.zip` from the release, unzip, and
+run `grit.exe` (or add its folder to `PATH`).
 
 Available archives: `linux_amd64`, `linux_arm64`, `darwin_amd64`,
 `darwin_arm64`, `windows_amd64`, `windows_arm64`. Verify with
@@ -101,34 +101,34 @@ Available archives: `linux_amd64`, `linux_arm64`, `darwin_amd64`,
 
 The native one-liner for Go tools — no manual cloning:
 ```bash
-go install github.com/aman5062/lazyhub@latest
-lazyhub   # from ~/go/bin (add it to PATH if needed)
+go install github.com/aman5062/grit@latest
+grit   # from ~/go/bin (add it to PATH if needed)
 ```
 
-### 3. Build from source (for developing lazyhub)
+### 3. Build from source (for developing grit)
 
 ```bash
-git clone https://github.com/aman5062/lazyhub.git
-cd lazyhub
-go build -o lazyhub .
-./lazyhub
+git clone https://github.com/aman5062/grit.git
+cd grit
+go build -o grit .
+./grit
 ```
 
-Check your version anytime with `lazyhub version`.
+Check your version anytime with `grit version`.
 
 ## Commands
 
 ```
-lazyhub          Launch the TUI (prompts login on first run)
-lazyhub login    Authenticate
-lazyhub logout   Remove stored token
-lazyhub whoami   Show current account
-lazyhub update   Update to the latest release in place (alias: upgrade)
-lazyhub version  Print the version
+grit          Launch the TUI (prompts login on first run)
+grit login    Authenticate
+grit logout   Remove stored token
+grit whoami   Show current account
+grit update   Update to the latest release in place (alias: upgrade)
+grit version  Print the version
 ```
 
-lazyhub checks for a newer release on startup and shows an unobtrusive
-`⬆ vX available` notice; run `lazyhub update` to self-update.
+grit checks for a newer release on startup and shows an unobtrusive
+`⬆ vX available` notice; run `grit update` to self-update.
 
 On launch you get a brief branded welcome screen (wordmark, a greeting, and a
 rotating tip) while your boards load in the background — press any key to jump

@@ -1,4 +1,4 @@
-module github.com/aman5062/lazyhub
+module github.com/aman5062/grit
 
 go 1.24.2
 

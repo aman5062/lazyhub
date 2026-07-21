@@ -20,7 +20,7 @@ func (c *Client) graphql(ctx context.Context, query string, vars map[string]any,
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "lazyhub")
+	req.Header.Set("User-Agent", "grit")
 
 	resp, err := c.http.Do(req)
 	if err != nil {

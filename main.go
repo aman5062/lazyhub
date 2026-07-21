@@ -1,4 +1,4 @@
-// lazyhub — a lazygit-style TUI for browsing and operating your GitHub
+// grit — a lazygit-style TUI for browsing and operating your GitHub
 // repositories. Authenticate once (PAT or OAuth device flow); the token is
 // stored locally so you never log in again.
 package main
@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/aman5062/lazyhub/internal/config"
-	"github.com/aman5062/lazyhub/internal/github"
-	"github.com/aman5062/lazyhub/internal/tui"
-	"github.com/aman5062/lazyhub/internal/update"
+	"github.com/aman5062/grit/internal/config"
+	"github.com/aman5062/grit/internal/github"
+	"github.com/aman5062/grit/internal/tui"
+	"github.com/aman5062/grit/internal/update"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -20,16 +20,16 @@ import (
 // (GoReleaser sets it to the git tag on release).
 var version = "dev"
 
-const usage = `lazyhub — GitHub in your terminal
+const usage = `grit — GitHub in your terminal
 
 Usage:
-  lazyhub            Launch the TUI (logs you in first if needed)
-  lazyhub login      Authenticate with GitHub (PAT or device flow)
-  lazyhub logout     Remove the stored credential
-  lazyhub whoami     Show the logged-in account
-  lazyhub update     Update to the latest release (alias: upgrade)
-  lazyhub version    Print the version
-  lazyhub help       Show this help
+  grit            Launch the TUI (logs you in first if needed)
+  grit login      Authenticate with GitHub (PAT or device flow)
+  grit logout     Remove the stored credential
+  grit whoami     Show the logged-in account
+  grit update     Update to the latest release (alias: upgrade)
+  grit version    Print the version
+  grit help       Show this help
 `
 
 func main() {
@@ -52,7 +52,7 @@ func main() {
 	case "whoami":
 		whoami()
 	case "version", "-v", "--version":
-		fmt.Printf("lazyhub %s\n", version)
+		fmt.Printf("grit %s\n", version)
 	case "upgrade", "update":
 		upgrade()
 	case "help", "-h", "--help":
@@ -79,7 +79,7 @@ func upgrade() {
 	if err != nil {
 		fail(err)
 	}
-	fmt.Printf("✓ Updated to %s. Restart lazyhub to use it.\n", latest)
+	fmt.Printf("✓ Updated to %s. Restart grit to use it.\n", latest)
 }
 
 // run ensures we're authenticated, then launches the TUI.
@@ -102,7 +102,7 @@ func run() {
 func whoami() {
 	a, err := config.LoadAuth()
 	if errors.Is(err, config.ErrNoAuth) {
-		fmt.Println("Not logged in. Run: lazyhub login")
+		fmt.Println("Not logged in. Run: grit login")
 		return
 	}
 	if err != nil {

@@ -44,7 +44,7 @@ func (c *Client) do(ctx context.Context, method, path string, out any) (*http.Re
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", "lazyhub")
+	req.Header.Set("User-Agent", "grit")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -149,7 +149,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) e
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", "lazyhub")
+	req.Header.Set("User-Agent", "grit")
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

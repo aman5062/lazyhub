@@ -1,5 +1,5 @@
-// Package update checks GitHub Releases for a newer lazyhub and can replace
-// the running binary in place (`lazyhub upgrade`).
+// Package update checks GitHub Releases for a newer grit and can replace
+// the running binary in place (`grit upgrade`).
 package update
 
 import (
@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const repo = "aman5062/lazyhub"
+const repo = "aman5062/grit"
 
 // ErrUpToDate means the current build is already the latest release.
 var ErrUpToDate = errors.New("already up to date")
@@ -31,7 +31,7 @@ func Latest(ctx context.Context) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://api.github.com/repos/"+repo+"/releases/latest", nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "lazyhub")
+	req.Header.Set("User-Agent", "grit")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -95,13 +95,13 @@ func numPrefix(s string) string {
 }
 
 // assetName is the release archive matching this OS/arch, e.g.
-// "lazyhub_linux_amd64.tar.gz" — must match the GoReleaser name template.
+// "grit_linux_amd64.tar.gz" — must match the GoReleaser name template.
 func assetName() string {
 	ext := ".tar.gz"
 	if runtime.GOOS == "windows" {
 		ext = ".zip"
 	}
-	return fmt.Sprintf("lazyhub_%s_%s%s", runtime.GOOS, runtime.GOARCH, ext)
+	return fmt.Sprintf("grit_%s_%s%s", runtime.GOOS, runtime.GOARCH, ext)
 }
 
 // SelfUpdate downloads the latest release for this platform and atomically
@@ -155,7 +155,7 @@ func SelfUpdate(ctx context.Context, current string) (string, error) {
 // returning a friendly sudo hint when we can't.
 func checkWritable(exe string) error {
 	dir := filepath.Dir(exe)
-	probe := filepath.Join(dir, ".lazyhub-write-test")
+	probe := filepath.Join(dir, ".grit-write-test")
 	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		if errors.Is(err, os.ErrPermission) {
@@ -171,12 +171,12 @@ func checkWritable(exe string) error {
 // permErr is the actionable message shown when the install location isn't
 // writable by the current user.
 func permErr(exe string) error {
-	return fmt.Errorf("%s is not writable by your user — re-run with elevated permissions:\n    sudo lazyhub update", exe)
+	return fmt.Errorf("%s is not writable by your user — re-run with elevated permissions:\n    sudo grit update", exe)
 }
 
 func downloadBinary(ctx context.Context, url string) ([]byte, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	req.Header.Set("User-Agent", "lazyhub")
+	req.Header.Set("User-Agent", "grit")
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -211,11 +211,11 @@ func extractTarGz(data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if filepath.Base(h.Name) == "lazyhub" {
+		if filepath.Base(h.Name) == "grit" {
 			return io.ReadAll(tr)
 		}
 	}
-	return nil, errors.New("lazyhub binary not found in archive")
+	return nil, errors.New("grit binary not found in archive")
 }
 
 func extractZip(data []byte) ([]byte, error) {
@@ -224,7 +224,7 @@ func extractZip(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	for _, f := range zr.File {
-		if filepath.Base(f.Name) == "lazyhub.exe" {
+		if filepath.Base(f.Name) == "grit.exe" {
 			rc, err := f.Open()
 			if err != nil {
 				return nil, err
@@ -233,5 +233,5 @@ func extractZip(data []byte) ([]byte, error) {
 			return io.ReadAll(rc)
 		}
 	}
-	return nil, errors.New("lazyhub.exe not found in archive")
+	return nil, errors.New("grit.exe not found in archive")
 }

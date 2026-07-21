@@ -1,4 +1,4 @@
-// Package tui is the lazyhub interface: a horizontal kanban board over your
+// Package tui is the grit interface: a horizontal kanban board over your
 // GitHub Projects. Columns are your real Status options (synced from GitHub),
 // laid out side by side. Move between columns and cards with the arrow keys;
 // assign people, move tickets between columns, and filter to your own work.
@@ -24,9 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aman5062/lazyhub/internal/config"
-	"github.com/aman5062/lazyhub/internal/github"
-	"github.com/aman5062/lazyhub/internal/update"
+	"github.com/aman5062/grit/internal/config"
+	"github.com/aman5062/grit/internal/github"
+	"github.com/aman5062/grit/internal/update"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -61,11 +61,11 @@ const (
 // clearFilter is the sentinel label for the "show everyone" row in the filter.
 const clearFilter = "★ Everyone"
 
-// splashArt is the lazyhub wordmark shown on the welcome screen. Box-drawing
+// splashArt is the grit wordmark shown on the welcome screen. Box-drawing
 // so it renders in any terminal without a special font.
-const splashArt = `╻  ┏━┓┏━┓╻ ╻╻ ╻╻ ╻╻
-┃  ┣━┫ ┏┛┗┳┛┣━┫┃ ┃┣━┓
-┗━╸╹ ╹┗━╸ ╹ ╹ ╹┗━┛┗━┛`
+const splashArt = `┏━╸ ┏━┓ ╺┳╸ ╺┳╸
+┃╺┓ ┣┳┛  ┃   ┃
+┗━┛ ╹┗╸ ╺┻╸  ╹`
 
 // splashMinDuration keeps the welcome screen on-screen at least this long so a
 // fast (cached) load doesn't make it blink past. The board load runs behind it.
@@ -1298,7 +1298,7 @@ func (m Model) splashView() string {
 
 func (m Model) View() string {
 	if m.width == 0 {
-		return "starting lazyhub…"
+		return "starting grit…"
 	}
 	if m.scr == screenSplash && m.err == nil {
 		return m.splashView()
@@ -1319,10 +1319,10 @@ func (m Model) View() string {
 	case m.filterAssignee != "":
 		scope = "Projects · @" + m.filterAssignee
 	}
-	header := titleStyle.Render("lazyhub") + statusBar.Render(" @"+m.login+"  ·  "+scope)
+	header := titleStyle.Render("grit") + statusBar.Render(" @"+m.login+"  ·  "+scope)
 	if m.updateAvail != "" {
 		header += lipgloss.NewStyle().Foreground(colorYellow).Bold(true).
-			Render("  ⬆ " + m.updateAvail + " available — run: lazyhub upgrade")
+			Render("  ⬆ " + m.updateAvail + " available — run: grit upgrade")
 	}
 
 	var body string
@@ -1858,7 +1858,7 @@ func (m Model) helpOverlay() string {
 		{"  ctrl+c", "quit"},
 	}
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(" lazyhub — keys ") + "\n\n")
+	b.WriteString(titleStyle.Render(" grit — keys ") + "\n\n")
 	for _, r := range rows {
 		if r[1] == "" {
 			b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Render(r[0]) + "\n")

@@ -3,8 +3,8 @@ package tui
 import (
 	"context"
 
-	"github.com/aman5062/lazyhub/internal/auth"
-	"github.com/aman5062/lazyhub/internal/config"
+	"github.com/aman5062/grit/internal/auth"
+	"github.com/aman5062/grit/internal/config"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -208,7 +208,7 @@ func (m LoginModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m LoginModel) View() string {
-	logo := titleStyle.Render(" lazyhub ") + lipgloss.NewStyle().
+	logo := titleStyle.Render(" grit ") + lipgloss.NewStyle().
 		Foreground(colorDim).Render("  GitHub Projects in your terminal")
 
 	var body string

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aman5062/lazyhub/internal/github"
+	"github.com/aman5062/grit/internal/github"
 	"github.com/charmbracelet/bubbles/viewport"
 )
 

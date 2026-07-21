@@ -5,7 +5,7 @@
 //   - Device flow: gh-style. We print a code, the user approves in the
 //     browser, and we poll for the token. No secret copy-pasting. This
 //     is the "install and just use it" experience — but it needs a
-//     registered OAuth App Client ID (set via LAZYHUB_CLIENT_ID or the
+//     registered OAuth App Client ID (set via GRIT_CLIENT_ID or the
 //     baked-in default below).
 package auth
 
@@ -20,18 +20,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aman5062/lazyhub/internal/config"
-	"github.com/aman5062/lazyhub/internal/github"
+	"github.com/aman5062/grit/internal/config"
+	"github.com/aman5062/grit/internal/github"
 )
 
-// defaultClientID is the OAuth App Client ID shipped with lazyhub.
+// defaultClientID is the OAuth App Client ID shipped with grit.
 // A device-flow Client ID is NOT a secret (there is no client secret in
 // the device flow), so it is safe to embed. Replace with your own
-// registered app's ID, or override at runtime with LAZYHUB_CLIENT_ID.
+// registered app's ID, or override at runtime with GRIT_CLIENT_ID.
 const defaultClientID = "Ov23liOwaFq7EqWmeKBE"
 
 func clientID() string {
-	if v := os.Getenv("LAZYHUB_CLIENT_ID"); v != "" {
+	if v := os.Getenv("GRIT_CLIENT_ID"); v != "" {
 		return v
 	}
 	return defaultClientID
@@ -73,7 +73,7 @@ type DeviceCode struct {
 }
 
 // ErrDeviceFlowUnavailable means no Client ID is configured.
-var ErrDeviceFlowUnavailable = errors.New("device flow needs an OAuth App Client ID (set LAZYHUB_CLIENT_ID)")
+var ErrDeviceFlowUnavailable = errors.New("device flow needs an OAuth App Client ID (set GRIT_CLIENT_ID)")
 
 // RequestDeviceCode starts the device flow and returns the code to display.
 func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {

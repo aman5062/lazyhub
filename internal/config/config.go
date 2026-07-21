@@ -1,11 +1,11 @@
-// Package config handles where lazyhub stores its state and how it
+// Package config handles where grit stores its state and how it
 // persists the GitHub token so the user authenticates only once.
 //
 // Storage strategy: the secret (the token) is kept in the OS keychain when
 // one is available — libsecret/GNOME-Keyring on Linux, the Keychain on macOS,
 // the Credential Manager on Windows — and the non-secret metadata (login,
 // method, scopes) lives in a small JSON file. When no keychain is reachable
-// (headless boxes, CI, SSH sessions without a session bus) lazyhub falls back
+// (headless boxes, CI, SSH sessions without a session bus) grit falls back
 // to the same 0600 file it always used, so login never fails.
 package config
 
@@ -20,7 +20,7 @@ import (
 
 // keychainService / keychainUser identify our secret in the OS keychain.
 const (
-	keychainService = "lazyhub"
+	keychainService = "grit"
 	keychainUser    = "github-token"
 )
 
@@ -35,13 +35,13 @@ type Auth struct {
 	Keychain  bool   `json:"keychain"`        // true when the token lives in the OS keychain
 }
 
-// Dir returns ~/.config/lazyhub, creating it if needed.
+// Dir returns ~/.config/grit, creating it if needed.
 func Dir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "lazyhub")
+	dir := filepath.Join(base, "grit")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

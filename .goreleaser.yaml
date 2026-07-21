@@ -1,8 +1,8 @@
-# GoReleaser config — cross-compiles lazyhub and publishes a GitHub Release.
+# GoReleaser config — cross-compiles grit and publishes a GitHub Release.
 # Docs: https://goreleaser.com
 version: 2
 
-project_name: lazyhub
+project_name: grit
 
 before:
   hooks:
@@ -46,6 +46,6 @@ changelog:
 release:
   github:
     owner: aman5062
-    name: lazyhub
+    name: grit
   draft: false
   prerelease: auto
